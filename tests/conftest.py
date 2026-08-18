@@ -74,6 +74,31 @@ def refund_body(
     )
 
 
+def adyen_body(
+    psp_reference: str,
+    event_code: str = "AUTHORISATION",
+    *,
+    merchant_reference: str = "order-1",
+    minor: int = 1000,
+    currency: str = "EUR",
+    original_reference: str = "",
+    event_date: str = "2026-08-18T10:00:00+00:00",
+    success: str = "true",
+) -> bytes:
+    """One NotificationRequestItem, unsigned. The verifier is exercised in test_verify_adyen."""
+    item = {
+        "pspReference": psp_reference,
+        "originalReference": original_reference,
+        "merchantAccountCode": "TestMerchant",
+        "merchantReference": merchant_reference,
+        "amount": {"value": minor, "currency": currency},
+        "eventCode": event_code,
+        "success": success,
+        "eventDate": event_date,
+    }
+    return json.dumps(item, sort_keys=True, separators=(",", ":")).encode()
+
+
 def insert_delivery(conn: sqlite3.Connection, delivery_id: str, raw: bytes = b"{}") -> str:
     """A delivery row the effects table can reference, for tests that bypass the inbox."""
     conn.execute(

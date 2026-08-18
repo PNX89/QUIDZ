@@ -5,13 +5,13 @@ import sqlite3
 
 import pytest
 
-from conftest import authorize_body
+from conftest import adyen_body, authorize_body
 from quidz import inbox
 from quidz.clock import FakeClock
 from quidz.dlq import REASON_CODES, RetryPolicy, classify, next_delay, should_retry
 from quidz.events import Provider
 from quidz.inbox import DeliveryState, claim, drain, drain_until_idle
-from quidz.ledger import apply_delivery
+from quidz.ledger import apply_delivery, load_payment
 
 
 def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock) -> str:
@@ -99,6 +99,40 @@ def test_the_delay_never_exceeds_the_ceiling() -> None:
 def test_an_unrecognised_failure_is_retryable_with_a_cap_and_never_dropped() -> None:
     reason = classify(RuntimeError("something new from the provider"))
     assert (reason.code, reason.retryable, reason.max_attempts) == ("unknown", True, 3)
+
+
+def test_a_double_authorization_dead_letters_instead_of_doubling_the_hold(
+    conn: sqlite3.Connection,
+) -> None:
+    """Two AUTHORISATIONs for one merchantReference, which is the shape of a real double auth.
+
+    Different pspReferences, so the unique index lets both effects through and the aggregate is
+    the only thing that can refuse. Summing them would leave one aggregate holding 2000 that
+    then permits a capture of 2000, and reconciliation would never see it: the ledger and the
+    provider would agree on the total.
+    """
+    clock = FakeClock()
+    for psp in ("PSPREFA", "PSPREFB"):
+        claim(
+            conn,
+            provider=Provider.ADYEN,
+            identity=f"{psp}:AUTHORISATION",
+            raw=adyen_body(psp),
+            headers={},
+            clock=clock,
+        )
+        clock.advance(1.0)
+    report = drain(conn, clock=clock, policy=RetryPolicy())
+    state = load_payment(conn, "order-1")
+    dead = conn.execute(
+        "SELECT reason_code FROM deliveries WHERE state = ?", (DeliveryState.DEAD_LETTERED,)
+    ).fetchall()
+    assert state is not None
+    assert (report.dead_lettered, state.authorized_minor, [row[0] for row in dead]) == (
+        1,
+        1000,
+        ["illegal_transition"],
+    )
 
 
 def test_a_redelivered_message_resolves_to_a_no_op_not_a_second_effect(

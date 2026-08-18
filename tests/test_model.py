@@ -114,6 +114,57 @@ def test_refund_reverse_after_a_succeeded_refund_reduces_refunded(
     assert (state.refunded_minor, derive_status(state)) == (0, "captured")
 
 
+def test_refund_fail_after_a_full_refund_still_applies(make_event: EventFactory) -> None:
+    # A full refund is the common shape and the one the rank ratchet used to make impossible:
+    # the aggregate reached refunded, and every refund correction ranks below it.
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    state = apply_effect(state, make_event(EffectKind.REFUND, 1000, ref="re_1"))
+    assert derive_status(state) == "refunded"
+    state = apply_effect(state, make_event(EffectKind.REFUND_FAIL, 1000, ref="re_1"))
+    assert (state.refunded_minor, state.refund_failed_minor, derive_status(state)) == (
+        0,
+        1000,
+        "captured",
+    )
+
+
+def test_refund_reverse_after_a_full_refund_still_applies(make_event: EventFactory) -> None:
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    state = apply_effect(state, make_event(EffectKind.REFUND, 1000, ref="re_1"))
+    state = apply_effect(state, make_event(EffectKind.REFUND_REVERSE, 1000, ref="re_1"))
+    assert (state.refunded_minor, derive_status(state)) == (0, "captured")
+
+
+def test_a_reversed_refund_still_refuses_a_late_void(make_event: EventFactory) -> None:
+    # The rank follows the money back down, so it must not fall far enough to let a stale
+    # cancellation land on a payment that is still captured.
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    state = apply_effect(state, make_event(EffectKind.REFUND, 1000, ref="re_1"))
+    state = apply_effect(state, make_event(EffectKind.REFUND_REVERSE, 1000, ref="re_1"))
+    with pytest.raises(IllegalTransition, match="regress"):
+        apply_effect(state, make_event(EffectKind.VOID))
+
+
+def test_a_second_authorization_is_a_double_authorization_not_a_larger_hold(
+    make_event: EventFactory,
+) -> None:
+    # Two AUTHORISATION events for one merchant reference is the real incident. Summing them
+    # gives one aggregate holding 2000 that then permits a capture of 2000.
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    with pytest.raises(IllegalTransition, match="double authorization"):
+        apply_effect(state, make_event(EffectKind.AUTHORIZE, 1000, ref="ref_auth_2"))
+    assert state.authorized_minor == 1000
+
+
+def test_an_adjustment_is_how_a_hold_legitimately_changes(make_event: EventFactory) -> None:
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.ADJUST_AUTH, 1500))
+    assert state.authorized_minor == 1500
+
+
 def test_rank_never_regresses_on_a_late_arriving_earlier_event(
     make_event: EventFactory,
 ) -> None:

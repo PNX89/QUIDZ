@@ -105,6 +105,15 @@ _PREREQUISITE_RANK: dict[EffectKind, int] = {
     EffectKind.REFUND_REVERSE: 60,
 }
 
+# The two effects that are inherently regressive: money coming back to the merchant after a
+# refund failed or was reversed. Every other transition moves a payment further along, which is
+# what makes the monotonic rank a safe way to tolerate out of order delivery. Applying the
+# ratchet to these two instead makes them impossible on a fully refunded payment, which is the
+# common shape: Adyen sends REFUND_FAILED and REFUNDED_REVERSED, Stripe a charge.refund.updated
+# carrying status failed, and dlq.classify maps IllegalTransition to non retryable, so the
+# refusal would dead letter on attempt one and the money would silently never come back.
+_REGRESSIVE = frozenset({EffectKind.REFUND_FAIL, EffectKind.REFUND_REVERSE})
+
 _NEEDS_AMOUNT = frozenset(
     {
         EffectKind.AUTHORIZE,
@@ -237,13 +246,31 @@ def apply_effect(state: PaymentState, event: CanonicalEvent) -> PaymentState:
             "capture is released, so a second capture is not possible"
         )
 
-    if _KIND_RANK[kind] < state.rank:
+    # Two authorizations against one payment id is a double authorization, which is real money
+    # and a CRITICAL on the provider side of the reconciliation. Folding a second one additively
+    # hides it inside a single aggregate that then permits a capture of the doubled amount. An
+    # increase to an existing hold arrives as AUTHORISATION_ADJUSTMENT carrying the new total,
+    # which is ADJUST_AUTH; incremental authorization is out of scope and says so here.
+    if kind is EffectKind.AUTHORIZE and state.authorized_minor > 0:
+        raise IllegalTransition(
+            f"payment {state.payment_id} already carries an authorization of "
+            f"{state.authorized_minor}; a second one is a double authorization rather than a "
+            "top up, and an adjustment arrives as adjust_auth carrying the new total"
+        )
+
+    if kind not in _REGRESSIVE and _KIND_RANK[kind] < state.rank:
         raise IllegalTransition(
             f"{kind} would regress payment {state.payment_id} below rank {state.rank}"
         )
 
     updated = _fold(state, kind, minor)
-    rank = max(state.rank, _KIND_RANK[kind], state_rank(derive_status(updated)))
+    if kind in _REGRESSIVE:
+        # The rank follows the money back down rather than ratcheting, so the aggregate keeps
+        # describing what it actually holds. The kind's own rank stays the floor, which leaves
+        # a further refund correction applicable and still refuses a late void or expire.
+        rank = max(_KIND_RANK[kind], state_rank(derive_status(updated)))
+    else:
+        rank = max(state.rank, _KIND_RANK[kind], state_rank(derive_status(updated)))
     return replace(
         updated,
         rank=rank,
@@ -253,7 +280,9 @@ def apply_effect(state: PaymentState, event: CanonicalEvent) -> PaymentState:
 
 def _fold(state: PaymentState, kind: EffectKind, minor: int) -> PaymentState:
     if kind is EffectKind.AUTHORIZE:
-        return replace(state, authorized_minor=state.authorized_minor + minor)
+        # Never additive. The guard above means this is only ever reached at zero, and summing
+        # two authorizations is how a double authorization stops being visible.
+        return replace(state, authorized_minor=minor)
     if kind is EffectKind.ADJUST_AUTH:
         # Adyen's AUTHORISATION_ADJUSTMENT carries the new total, not a delta.
         return replace(state, authorized_minor=minor)
