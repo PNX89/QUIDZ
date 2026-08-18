@@ -383,7 +383,10 @@ def _read_snapshot(path: Path) -> tuple[float, list[RemotePayment]] | None:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         return float(payload["as_of"]), [RemotePayment(**row) for row in payload["payments"]]
-    except (ValueError, KeyError, TypeError) as exc:
+    # ValueError covers both decode failures: JSONDecodeError for a truncated file and
+    # UnicodeDecodeError for a corrupt one. OSError is here because exists() is true for a
+    # directory and for a file this process cannot open.
+    except (OSError, ValueError, KeyError, TypeError) as exc:
         raise CliError(f"provider snapshot {path} is not readable: {exc}") from exc
 
 
@@ -470,6 +473,13 @@ def _read_log(path: Path) -> tuple[list[tuple[Provider, str, bytes, dict[str, st
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         raise CliError(f"cannot read delivery log {path}: {exc.strerror}") from exc
+    # A truncated or corrupt log is not an OSError. UnicodeDecodeError is a ValueError, so the
+    # handler above does not see it and the command exits on a traceback, which for `replay`
+    # means exit 1: the code that says the ledger did not reproduce its terminal state.
+    except UnicodeDecodeError as exc:
+        raise CliError(
+            f"delivery log {path} is not valid UTF-8 at byte {exc.start}: {exc.reason}"
+        ) from exc
     deliveries: list[tuple[Provider, str, bytes, dict[str, str]]] = []
     expected: dict[str, str] | None = None
     for number, line in enumerate(text.splitlines(), start=1):

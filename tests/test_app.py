@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 from collections.abc import Iterator
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -24,9 +27,9 @@ def clock() -> FakeClock:
 
 
 @pytest.fixture
-def client(tmp_path: Path, clock: FakeClock) -> Iterator[TestClient]:
+def client(db_path: Path, clock: FakeClock) -> Iterator[TestClient]:
     app = create_app(
-        db_path=str(tmp_path / "quidz.db"),
+        db_path=str(db_path),
         secrets=SIM.stripe_secrets,
         adyen_hmac_key_hex=SIM.adyen_hmac_key_hex,
         clock=clock,
@@ -37,6 +40,26 @@ def client(tmp_path: Path, clock: FakeClock) -> Iterator[TestClient]:
 
 def first(provider: Provider) -> Delivery:
     return next(d for d in SIM.deliveries("happy") if d.provider is provider)
+
+
+def sign(raw: bytes) -> dict[str, str]:
+    """Sign an arbitrary body the way the simulator does, at the batch receipt time."""
+    timestamp = int(SIM.started_at)
+    signed = f"{timestamp}.".encode() + raw
+    parts = [f"t={timestamp}"] + [
+        f"v1={hmac.new(secret, signed, hashlib.sha256).hexdigest()}"
+        for secret in SIM.stripe_secrets
+    ]
+    return {"Stripe-Signature": ",".join(parts)}
+
+
+def write_snapshot(db_path: Path) -> None:
+    """The provider payment list a demo run drops beside the database."""
+    payload = {
+        "as_of": SIM.started_at,
+        "payments": [asdict(payment) for payment in SIM.remote_payments()],
+    }
+    Path(f"{db_path}.remote.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_a_valid_stripe_delivery_is_accepted(client: TestClient) -> None:
@@ -72,7 +95,17 @@ def test_the_adyen_route_acknowledges_with_the_documented_body(client: TestClien
     assert (response.status_code, response.text) == (200, "[accepted]")
 
 
-def test_the_report_route_returns_stable_parseable_json(client: TestClient) -> None:
+def test_a_body_that_verifies_but_will_not_parse_is_a_client_error(client: TestClient) -> None:
+    # Signed with a live secret and still undecodable. json.loads raises JSONDecodeError here
+    # and UnicodeDecodeError for the second body, and neither is an EventError, so both used
+    # to escape the route as a 500.
+    for raw in (b"not json at all", b'{"id":"evt_1","type":"\xff\xfe"}'):
+        response = client.post("/webhooks/stripe", content=raw, headers=sign(raw))
+        assert response.status_code == 400, raw
+
+
+def test_the_report_route_returns_stable_parseable_json(client: TestClient, db_path: Path) -> None:
+    write_snapshot(db_path)
     delivery = first(Provider.STRIPE)
     client.post("/webhooks/stripe", content=delivery.raw, headers=delivery.headers)
     first_body = client.get("/reconcile/report").text
@@ -81,3 +114,19 @@ def test_the_report_route_returns_stable_parseable_json(client: TestClient) -> N
         False,
         True,
     )
+
+
+def test_the_report_route_refuses_rather_than_reconcile_against_no_provider(
+    client: TestClient,
+) -> None:
+    # Nothing on disk to compare against. Falling back to an empty payment list would report
+    # every payment in the ledger as missing remotely and close the gate on the whole book,
+    # which is a self inflicted incident caused by a missing file.
+    assert client.get("/reconcile/report").status_code == 503
+
+
+def test_an_unreadable_provider_snapshot_is_refused_the_same_way_as_a_missing_one(
+    client: TestClient, db_path: Path
+) -> None:
+    Path(f"{db_path}.remote.json").write_bytes(b'{"as_of": 1.0, "payments": [\xff]}')
+    assert client.get("/reconcile/report").status_code == 503

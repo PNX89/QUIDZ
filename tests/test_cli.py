@@ -56,6 +56,31 @@ def test_an_unknown_flag_is_a_usage_error() -> None:
     assert raised.value.code == 2
 
 
+def test_a_delivery_log_that_is_not_utf_8_is_a_usage_error_and_not_a_mismatch(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Exit 1 out of replay means the ledger did not reproduce its recorded terminal state.
+
+    A log this process cannot decode has to be exit 2, the unreadable-input code, because
+    UnicodeDecodeError is a ValueError and the OSError handler beside it never sees one. Left
+    alone it exits on a traceback, and an operator reads that as replay drift.
+    """
+    log = tmp_path / "broken.jsonl"
+    log.write_bytes(b'{"kind":"delivery","provider":"stripe"\xff}\n')
+    code = main(["replay", str(log), "--db", str(tmp_path / "replayed.db"), "--assert-terminal"])
+    assert (code, "not valid UTF-8" in capsys.readouterr().err) == (2, True)
+
+
+def test_a_provider_snapshot_that_is_not_utf_8_is_a_usage_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    db_path = run_demo(tmp_path)
+    capsys.readouterr()
+    Path(f"{db_path}.remote.json").write_bytes(b'{"as_of": 1.0, "payments": [\xff]}')
+    code = main(["reconcile", "--db", str(db_path)])
+    assert (code, "is not readable" in capsys.readouterr().err) == (2, True)
+
+
 def test_replay_reproduces_the_terminal_state_of_the_run_that_logged_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

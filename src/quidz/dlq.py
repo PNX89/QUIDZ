@@ -53,6 +53,11 @@ _CLASSIFIERS: tuple[tuple[type[BaseException], str], ...] = (
     (UnknownEventType, "unknown_event_type"),
     (MalformedEvent, "schema_invalid"),
     (json.JSONDecodeError, "schema_invalid"),
+    # A body that is not UTF-8 fails the same parse for the same permanent reason, but
+    # UnicodeDecodeError is a ValueError rather than a JSONDecodeError, so without this entry
+    # it falls through to the retryable catch all and burns three attempts on a stored payload
+    # that cannot change between them.
+    (UnicodeDecodeError, "schema_invalid"),
     (CurrencyMismatch, "currency_mismatch"),
     (AmountInvariantViolation, "amount_invariant"),
     (IllegalTransition, "illegal_transition"),

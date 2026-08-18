@@ -30,17 +30,22 @@ __all__ = ["create_app"]
 
 
 def _provider_snapshot(db_path: str) -> tuple[float, list[RemotePayment]] | None:
-    """Read the payment list a demo run dropped beside the database.
+    """Read the payment list a demo run dropped beside the database, or None if there is none.
 
-    A deployed service would pull this from the provider API on a schedule. This adapter
-    reads whatever snapshot is on disk and says nothing when there is none, rather than
-    reconciling against an empty provider and reporting every payment as missing remotely.
+    A deployed service would pull this from the provider API on a schedule. None has to stop
+    the report rather than fall back to an empty provider: with no remote rows every payment in
+    the ledger reads as MISSING_REMOTELY and the gate closes on the whole book, which is a
+    self inflicted incident caused by a missing file.
+
+    Unreadable counts as absent. json.loads raises JSONDecodeError on a truncated file and
+    UnicodeDecodeError on a corrupt one, and since both are ValueError rather than OSError the
+    obvious handler catches neither, so the route answered 500 to a routine disk problem.
     """
-    path = Path(f"{db_path}.remote.json")
-    if not path.exists():
+    try:
+        payload = json.loads(Path(f"{db_path}.remote.json").read_text(encoding="utf-8"))
+        return float(payload["as_of"]), [RemotePayment(**row) for row in payload["payments"]]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return float(payload["as_of"]), [RemotePayment(**row) for row in payload["payments"]]
 
 
 def _adyen_items(payload: object) -> list[Mapping[str, object]]:
@@ -88,7 +93,10 @@ def create_app(
                 result = receive_stripe(conn, raw, request.headers, secrets=secrets, clock=ticker)
             except SignatureError as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)
-            except EventError as exc:
+            # ValueError is here for the body that verified and then would not parse:
+            # JSONDecodeError when it is not JSON, UnicodeDecodeError when it is not UTF-8.
+            # Neither is an EventError, so both used to leave as a 500.
+            except (EventError, ValueError) as exc:
                 return JSONResponse({"error": str(exc)}, status_code=400)
         if result.reason == "in_progress":
             return JSONResponse({"error": "delivery is still being processed"}, status_code=409)
@@ -125,7 +133,13 @@ def create_app(
     @app.get("/reconcile/report")
     async def reconcile_report() -> Response:
         snapshot = _provider_snapshot(db_path)
-        now, remote = (ticker.now(), []) if snapshot is None else snapshot
+        if snapshot is None:
+            # No answer beats a wrong one. The CLI refuses the same way, for the same reason.
+            return JSONResponse(
+                {"error": "no readable provider payment list beside the database"},
+                status_code=503,
+            )
+        now, remote = snapshot
         policy = GatePolicy()
         with closing(store.connect(db_path)) as conn:
             report = reconcile(

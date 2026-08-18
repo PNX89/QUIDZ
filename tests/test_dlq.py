@@ -101,6 +101,26 @@ def test_an_unrecognised_failure_is_retryable_with_a_cap_and_never_dropped() -> 
     assert (reason.code, reason.retryable, reason.max_attempts) == ("unknown", True, 3)
 
 
+def test_a_body_that_is_not_utf_8_is_permanent_and_not_retried() -> None:
+    # UnicodeDecodeError is a ValueError, not a JSONDecodeError, so without an entry of its own
+    # it lands in the retryable catch all and burns three attempts on stored bytes that cannot
+    # change between them. It is the same permanent parse failure as malformed JSON.
+    with pytest.raises(UnicodeDecodeError) as raised:
+        b'{"id":"\xff"}'.decode("utf-8")
+    reason = classify(raised.value)
+    assert (reason.code, reason.retryable) == ("schema_invalid", False)
+
+
+def test_a_stored_delivery_that_is_not_utf_8_dead_letters_on_the_first_attempt(
+    conn: sqlite3.Connection,
+) -> None:
+    clock = FakeClock()
+    take(conn, "evt_bad", b'{"id":"evt_bad","type":"\xff\xfe"}', clock)
+    report = drain(conn, clock=clock, policy=RetryPolicy())
+    row = delivery(conn)
+    assert (report.dead_lettered, report.retried, row["reason_code"]) == (1, 0, "schema_invalid")
+
+
 def test_a_double_authorization_dead_letters_instead_of_doubling_the_hold(
     conn: sqlite3.Connection,
 ) -> None:
