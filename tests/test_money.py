@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import pytest
 
-from quidz.money import CurrencyMismatch, Money, add, exponent, format_major, sub
+from quidz.money import (
+    ADYEN_EXPONENT,
+    CurrencyMismatch,
+    Money,
+    add,
+    exponent,
+    format_major,
+    sub,
+)
 
 
 def test_minor_must_be_an_int_and_bool_is_rejected() -> None:
@@ -27,6 +35,26 @@ def test_three_decimal_currencies_have_exponent_three() -> None:
 
 def test_ordinary_currencies_have_exponent_two() -> None:
     assert (exponent("EUR"), exponent("USD")) == (2, 2)
+
+
+def test_the_four_currencies_adyen_scales_differently_follow_iso_here() -> None:
+    """CLP, CVE, IDR and ISK are the codes Adyen's own table disagrees with ISO 4217 on.
+
+    The ledger holds one scale and it is the ISO one, so these four have to be right by ISO
+    and knowingly different from Adyen rather than accidentally either. An integration that
+    submitted to Adyen, or ingested these four from Adyen, would scale at the adapter.
+    """
+    iso = {"CLP": 0, "CVE": 2, "IDR": 2, "ISK": 0}
+    assert {code: exponent(code) for code in ADYEN_EXPONENT} == iso
+    # Every entry in the table earns its place by differing, or it is noise in a comment.
+    assert all(exponent(code) != scale for code, scale in ADYEN_EXPONENT.items())
+
+
+def test_the_zero_decimal_set_is_iso_and_not_a_provider_table() -> None:
+    # ISK is the sharpest of the four: zero decimal by ISO, two decimal to Adyen, so getting
+    # it from the wrong table overstates every ISK amount by a factor of a hundred.
+    assert format_major(Money(1130, "ISK")) == "1130 ISK"
+    assert format_major(Money(1130, "IDR")) == "11.30 IDR"
 
 
 def test_arithmetic_refuses_to_cross_currencies() -> None:

@@ -6,9 +6,12 @@ the ledger, and there is no rounding, because this repo has no split or allocati
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 __all__ = [
+    "ADYEN_EXPONENT",
     "THREE_DECIMAL",
     "ZERO_DECIMAL",
     "CurrencyMismatch",
@@ -19,8 +22,7 @@ __all__ = [
     "sub",
 ]
 
-# ISO 4217 exponents are not universally 2, so a hardcoded * 100 is a defect.
-# https://docs.adyen.com/development-resources/currency-codes
+# ISO 4217 exponents, which are not universally 2, so a hardcoded * 100 is a defect.
 ZERO_DECIMAL: frozenset[str] = frozenset(
     {
         "BIF",
@@ -42,6 +44,20 @@ ZERO_DECIMAL: frozenset[str] = frozenset(
     }
 )
 THREE_DECIMAL: frozenset[str] = frozenset({"BHD", "IQD", "JOD", "KWD", "LYD", "OMR", "TND"})
+
+# Adyen's currency table deliberately disagrees with ISO 4217 on exactly four codes, and Adyen
+# names them as the trap: "For CLP, CVE, IDR, and ISK the ISO 4217 standard has a different
+# number of decimals than shown in our currency codes table". ISK is the sharpest of them, zero
+# decimal under ISO and two decimal to Adyen, so reading an Adyen ISK amount as an ISO minor
+# unit is wrong by a factor of 100 in the direction that overstates the money.
+#
+# This is deliberately a named constant and not a branch. The ledger holds one scale, the ISO
+# one, and this repo consumes webhooks rather than submitting payments or payouts, so nothing
+# here converts. Anything that did submit to Adyen would have to scale by this table on the way
+# out, and an integration ingesting these four currencies from Adyen would have to scale on the
+# way in, at the adapter, before the amount ever reaches an aggregate.
+# https://docs.adyen.com/development-resources/currency-codes
+ADYEN_EXPONENT: Mapping[str, int] = MappingProxyType({"CLP": 2, "CVE": 0, "IDR": 0, "ISK": 2})
 
 _DEFAULT_EXPONENT = 2
 
@@ -74,6 +90,7 @@ class Money:
 
 
 def exponent(currency: str) -> int:
+    """The ISO 4217 exponent. See ADYEN_EXPONENT for the four codes Adyen scales differently."""
     _validate_currency(currency)
     if currency in ZERO_DECIMAL:
         return 0

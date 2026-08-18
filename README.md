@@ -372,13 +372,22 @@ not have been in it.
 **Amounts are `(minor: int, currency: str)`, with the exponent per currency.** No float, no
 `Decimal` in storage, no bare numbers, and `add` and `sub` raise `CurrencyMismatch` across
 currencies. Nothing rounds, because there is no split or allocation path here. A hardcoded
-`* 100` is a defect: exponent 0 covers BIF, CLP, DJF, GNF, ISK, JPY, KMF, KRW, PYG, RWF, UGX,
-VND, VUV, XAF, XOF and XPF; exponent 3 covers BHD, IQD, JOD, KWD, LYD, OMR and TND; everything
-else is 2. The JPY row in the demo output prints `5300 JPY` with no fractional part for exactly
-this reason. Two provider quirks are worth knowing even though this repo has no payout path and
-does not implement them: Stripe treats ISK and UGX as zero-decimal but requires two-decimal
-values whose decimal part is always `00`, and treats HUF and TWD as zero-decimal for payouts,
-where payout amounts have to divide evenly by 100.
+`* 100` is a defect: under ISO 4217, exponent 0 covers BIF, CLP, DJF, GNF, ISK, JPY, KMF, KRW,
+PYG, RWF, UGX, VND, VUV, XAF, XOF and XPF; exponent 3 covers BHD, IQD, JOD, KWD, LYD, OMR and
+TND; everything else is 2. The JPY row in the demo output prints `5300 JPY` with no fractional
+part for exactly this reason.
+
+The scale is ISO 4217 and nothing else, which matters because the providers do not all agree
+with it. Adyen's own currency table differs on four codes and says so outright: "For CLP, CVE,
+IDR, and ISK the ISO 4217 standard has a different number of decimals than shown in our
+currency codes table." ISK is the sharpest, zero-decimal under ISO and two-decimal to Adyen, so
+reading an Adyen ISK amount as an ISO minor unit overstates it by a factor of a hundred. Those
+four are named in `quidz.money` as `ADYEN_EXPONENT`, deliberately as a constant and not as a
+branch: this repo consumes webhooks rather than submitting payments, so nothing converts, and
+an integration that did would scale at the adapter before the amount reached an aggregate.
+Stripe has its own two: it treats ISK and UGX as zero-decimal but requires two-decimal values
+whose decimal part is always `00`, and treats HUF and TWD as zero-decimal for payouts, where
+payout amounts have to divide evenly by 100.
 <https://docs.adyen.com/development-resources/currency-codes>, <https://docs.stripe.com/currencies>
 
 **Status is derived, never stored as the source of truth.** The stored truth is the aggregate's
@@ -457,6 +466,10 @@ Read this section before believing anything above it.
   described rather than built.
 - **FX and presentment against settlement currency are not modelled.** Amounts carry a currency
   and cross-currency arithmetic raises, but nothing converts and there is no rate anywhere.
+- **The four currencies Adyen scales differently are named, not normalised.** CLP, CVE, IDR and
+  ISK arrive from Adyen on Adyen's scale rather than the ISO one. `ADYEN_EXPONENT` records the
+  difference and no adapter rescales at ingest, because the fixture provider never sends them
+  and a conversion no test exercises is worse than a documented gap.
 - **Multicapture, overcapture and incremental authorization are not modelled.**
 - **No outbox.** The inbox is implemented because the architecture implies it and both providers
   ask for it. The outbox is its mirror image on the outbound edge: the row commits in the same
