@@ -1,0 +1,65 @@
+[project]
+name = "quidz"
+version = "0.1.0"
+description = "Fail-closed payment webhook reconciliation over synthetic data."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Quelin Zammit" }]
+keywords = ["payments", "webhooks", "idempotency", "reconciliation", "fintech"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Office/Business :: Financial",
+    "Typing :: Typed",
+]
+# The core is stdlib only. Every third party package this repo touches is optional or dev.
+dependencies = []
+
+[project.optional-dependencies]
+# FastAPI's pydantic v1 compatibility shim emits a UserWarning on Python 3.14 below these
+# bounds (fastapi PR #14186). filterwarnings = ["error"] turns that into a failing 3.14 leg.
+server = ["fastapi>=0.128", "pydantic>=2.12.1", "uvicorn>=0.35"]
+
+[project.scripts]
+quidz = "quidz.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/PNX89/QUIDZ"
+Source = "https://github.com/PNX89/QUIDZ"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/quidz"]
+
+[dependency-groups]
+# httpx drives the --http demo flag through ASGITransport. httpx2 is what starlette 1.6
+# requires for fastapi.testclient.TestClient, and because filterwarnings = ["error"] has an
+# empty ignore list, starlette's deprecation of httpx there is a failing test, not a note.
+dev = ["pytest>=8", "httpx>=0.28", "httpx2>=2.10", "ruff>=0.14", "quidz[server]"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N"]
+# N818 wants every exception name to end in Error. BadSignature, StaleTimestamp and
+# PrematureEvent read better at the raise site and are the names used in the README.
+ignore = ["N818"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+# No ignore list. An unexpected warning from a dependency is a failure, not a note.
+filterwarnings = ["error"]
