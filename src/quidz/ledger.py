@@ -87,7 +87,7 @@ def apply_delivery(
     the unique index rather than by the state machine. Fold first and a repeated capture looks
     like an illegal second capture and lands in the dead letter queue instead of resolving to
     the no-op it actually is. The savepoint is what lets the insert stand for the duplicate
-    check and still leave no row behind when the effect turns out to be premature.
+    check and still leave no row behind when the effect is rejected, however it is rejected.
     """
     state = load_payment(conn, event.payment_id)
     if state is None:
@@ -117,12 +117,19 @@ def apply_delivery(
             ),
         )
         updated = apply_effect(state, event)
-    except (sqlite3.IntegrityError, PrematureEvent) as exc:
+    # Every escape unwinds the savepoint, not only the two that are answered with an outcome.
+    # A domain rejection is documented as raising so the caller can classify it into a reason
+    # code, and a caller that does exactly that outside a write_tx used to commit the effect
+    # row of the very effect apply_effect had just refused, leaving the aggregate disagreeing
+    # with the sum of its own children.
+    except BaseException as exc:
         conn.execute("ROLLBACK TO quidz_effect")
         conn.execute("RELEASE quidz_effect")
         if isinstance(exc, PrematureEvent):
             return ApplyOutcome.PARKED
-        return ApplyOutcome.NOOP_DUPLICATE
+        if isinstance(exc, sqlite3.IntegrityError):
+            return ApplyOutcome.NOOP_DUPLICATE
+        raise
     conn.execute("RELEASE quidz_effect")
 
     conn.execute(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import random
 import sqlite3
 from pathlib import Path
@@ -17,8 +18,6 @@ from quidz.model import AmountInvariantViolation
 
 
 def deliver(conn: sqlite3.Connection, delivery_id: str, raw: bytes) -> ApplyOutcome:
-    import json
-
     insert_delivery(conn, delivery_id, raw)
     with store.write_tx(conn):
         return apply_delivery(conn, delivery_id, from_stripe(json.loads(raw)))
@@ -85,12 +84,35 @@ def test_the_providers_own_amount_strings_are_stored_verbatim(conn: sqlite3.Conn
     assert (row["raw_amount_value"], row["raw_currency"]) == ("1000", "eur")
 
 
-def test_a_rejected_effect_writes_no_partial_row(conn: sqlite3.Connection) -> None:
+def test_a_rejected_effect_rolls_back_the_whole_write_tx(conn: sqlite3.Connection) -> None:
     deliver(conn, "stripe:evt_auth", authorize_body("evt_auth", minor=1000))
     with pytest.raises(AmountInvariantViolation):
         deliver(conn, "stripe:evt_cap", capture_body("evt_cap", minor=5000))
     kinds = [row[1] for row in effect_rows(conn)]
     assert kinds == ["authorize"]
+
+
+def test_a_rejected_effect_unwinds_its_savepoint_without_a_write_tx(
+    conn: sqlite3.Connection,
+) -> None:
+    """apply_delivery is exported and documented as raising, so a caller may well commit.
+
+    Deliberately no write_tx here. Its blanket ROLLBACK is what makes the test above pass
+    whether or not the savepoint is unwound, so it proves the wrapper rather than the function
+    it wraps. Committing after the rejection is the case that put an over-capture of 99999
+    against an authorization of 1000 into effects while payments still read captured 0.
+    """
+    deliver(conn, "stripe:evt_auth", authorize_body("evt_auth", minor=1000))
+    raw = capture_body("evt_cap", minor=99999)
+    insert_delivery(conn, "stripe:evt_cap", raw)
+    conn.execute("BEGIN IMMEDIATE")
+    with pytest.raises(AmountInvariantViolation):
+        apply_delivery(conn, "stripe:evt_cap", from_stripe(json.loads(raw)))
+    conn.execute("COMMIT")
+
+    state = load_payment(conn, "pi_1")
+    assert state is not None
+    assert ([row[1] for row in effect_rows(conn)], state.captured_minor) == (["authorize"], 0)
 
 
 def test_twenty_seeded_permutations_reach_one_terminal_aggregate(tmp_path: Path) -> None:
