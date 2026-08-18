@@ -15,9 +15,6 @@ ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "src" / "quidz"
 SERVER_ONLY = {"fastapi", "starlette", "pydantic", "uvicorn"}
 SKIP_DIRECTORIES = {".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "dist", "build"}
-# The escape sequences, so this file stays free of the codepoints it is looking for.
-EM_DASH = "\u2014"
-EN_DASH = "\u2013"
 
 
 def top_level_imports(path: Path) -> set[str]:
@@ -84,15 +81,32 @@ def test_only_the_adapter_reaches_for_a_web_framework() -> None:
     assert (offenders, "sqlite3" in model_imports) == ({}, False)
 
 
-def test_no_tracked_file_carries_an_em_dash_or_an_en_dash() -> None:
+def test_every_tracked_file_is_pure_ascii() -> None:
+    """A non-ASCII codepoint in source is where a homoglyph or a bidi override hides.
+
+    Trojan Source, CVE-2021-42574: a right-to-left override reorders how a reviewer reads a
+    line without changing how the interpreter runs it, and a Cyrillic letter that draws like a
+    Latin one makes two distinct identifiers look like one. Both survive code review by
+    construction and neither survives a byte scan.
+
+    It buys a second thing cheaply. The report renderers lay out fixed-width columns that an
+    on-call reads at 3am, and a codepoint whose display width the terminal disagrees about
+    takes the alignment of every column after it.
+    """
+    checked: list[Path] = []
     offenders: list[str] = []
     for path in tracked_files():
         try:
-            text = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError):
+            data = path.read_bytes()
+        except OSError:
             continue
-        if EM_DASH in text or EN_DASH in text:
-            offenders.append(str(path.relative_to(ROOT)))
+        checked.append(path)
+        offending = next((index for index, byte in enumerate(data) if byte > 0x7F), None)
+        if offending is not None:
+            offenders.append(f"{path.relative_to(ROOT)} byte {offending}")
+    # Proves the scan reached the package rather than an empty file list, which is what a
+    # git ls-files that returns nothing would silently look like.
+    assert PACKAGE / "money.py" in checked
     assert offenders == []
 
 
