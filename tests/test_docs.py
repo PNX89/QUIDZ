@@ -10,9 +10,11 @@ from quidz.cli import build_parser, main
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 
-# Only the database and delivery log lines carry the temporary path, so they are the only two
-# lines a run into tmp_path may legitimately differ on.
-VOLATILE_PREFIXES = ("  database", "  delivery log")
+# The --db value the README's Quickstart passes, and therefore the path its output block
+# prints. This run uses tmp_path instead and substitutes, rather than skipping those two lines:
+# the block is the one thing a reader is invited to check against a real run, so a line the
+# comparison excludes is the line that drifts.
+README_DB = "/tmp/quidz-demo/quidz.db"
 
 # The facts this design rests on, each one cited where it is used. Reachability is deliberately
 # not checked: no test in this repository touches the network.
@@ -63,39 +65,59 @@ def demo_block() -> list[str]:
 
 
 def documented_commands() -> list[list[str]]:
+    """Every `quidz ...` the README shows, in a bash fence or in prose backticks alike.
+
+    The exit codes of `quidz reconcile --fail-on` and `quidz replay --assert-terminal` are the
+    CI contract this repo argues for, and both are documented in prose, so a scan that reads
+    fenced blocks only covers everything except the two commands that matter most.
+    """
+    text = README.read_text(encoding="utf-8")
+    lines = [line for info, body in fenced_blocks(text) if info == "bash" for line in body]
+    lines += [
+        span
+        for span in re.findall(r"`([^`\n]+)`", text)
+        if span == "quidz" or span.startswith("quidz ")
+    ]
     out: list[list[str]] = []
-    for info, body in fenced_blocks(README.read_text(encoding="utf-8")):
-        if info != "bash":
+    for line in lines:
+        tokens = shlex.split(line.split("#", 1)[0])
+        if "quidz" not in tokens:
             continue
-        for line in body:
-            tokens = shlex.split(line.split("#", 1)[0])
-            if "quidz" not in tokens:
-                continue
-            index = tokens.index("quidz")
-            if index == 0 or tokens[index - 1] == "run":
-                out.append(tokens[index + 1 :])
+        index = tokens.index("quidz")
+        if index == 0 or tokens[index - 1] == "run":
+            out.append(tokens[index + 1 :])
     return out
-
-
-def stable_lines(text: str) -> list[str]:
-    return [line for line in text.splitlines() if not line.startswith(VOLATILE_PREFIXES)]
 
 
 def test_the_readme_output_block_is_what_the_demo_actually_prints(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The README's example output is a captured run, and stays one as the code changes."""
-    argv = ["demo", "--scenario", "adversarial", "--seed", "0", "--db", str(tmp_path / "q.db")]
+    """The README's example output is a captured run, and stays one as the code changes.
+
+    Every line is compared, the database and delivery log paths included. Only the temporary
+    directory this run was given is normalised to the one the README's own command passes.
+    """
+    db_path = tmp_path / "quidz.db"
+    argv = ["demo", "--scenario", "adversarial", "--seed", "0", "--db", str(db_path)]
     assert main(argv) == 0
-    printed = stable_lines(capsys.readouterr().out)
-    assert printed == stable_lines("\n".join(demo_block()))
+    printed = capsys.readouterr().out.replace(str(db_path), README_DB)
+    assert printed.splitlines() == demo_block()
 
 
 def test_every_command_the_readme_shows_is_one_the_cli_accepts() -> None:
     parser = build_parser()
-    commands = documented_commands()
-    parsed = [parser.parse_args(argv).command for argv in commands]
-    assert (len(commands), set(parsed)) == (5, {"demo"})
+    parsed = [parser.parse_args(argv).command for argv in documented_commands()]
+    assert set(parsed) == {"demo", "reconcile", "replay"}
+
+
+def test_the_quickstart_runs_the_command_that_produced_the_output_block() -> None:
+    """A block introduced as a real run has to be reproducible from a command the README gives.
+
+    Without the explicit --db the demo writes to a fresh mkdtemp path, so the two path lines
+    shown could not come from the command shown.
+    """
+    quickstart = next(argv for argv in documented_commands() if argv[:1] == ["demo"])
+    assert quickstart == ["demo", "--scenario", "adversarial", "--db", README_DB]
 
 
 def test_the_readme_cites_every_source_the_design_depends_on() -> None:

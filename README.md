@@ -32,14 +32,18 @@ correct, and almost all of that work is defensive.
 git clone https://github.com/PNX89/QUIDZ.git
 cd QUIDZ
 uv sync --all-extras --dev
-uv run quidz demo --scenario adversarial
+uv run quidz demo --scenario adversarial --db /tmp/quidz-demo/quidz.db
 ```
 
 Under a minute from clone to output. Nothing to configure, no key to supply, no network call.
+Without `--db` the demo writes to a fresh temporary directory, which is the default so that
+repeated runs never accumulate state; the Quickstart names a path so that its output is the
+block below down to the last line.
 
 ## What the demo prints
 
-Real output from `quidz demo --scenario adversarial`, copied from a run on this machine:
+Real output from the Quickstart command above. `tests/test_docs.py` re-runs the demo and diffs
+this block against what it printed, every line of it, so the block cannot drift from the code:
 
 ```
 QUIDZ demo
@@ -103,9 +107,9 @@ COUNTERS
   oldest_unresolved_drift_seconds     346808
 ```
 
-Every identifier, amount and settlement row above is synthetic and seeded. The seed is printed,
-and `--db` defaults to a fresh temporary file so repeated runs do not accumulate state. Do not
-take my word for any line of it: inject one failure at a time and watch which counter moves.
+Every identifier, amount and settlement row above is synthetic and seeded, and the seed is
+printed. Do not take my word for any line of it: inject one failure at a time and watch which
+counter moves.
 
 ```bash
 quidz demo --break tamper       # a body edited after signing, signature_rejected goes to 1
