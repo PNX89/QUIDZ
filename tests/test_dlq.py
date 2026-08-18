@@ -1,0 +1,118 @@
+from __future__ import annotations
+
+import random
+import sqlite3
+
+import pytest
+
+from conftest import authorize_body
+from quidz import inbox
+from quidz.clock import FakeClock
+from quidz.dlq import REASON_CODES, RetryPolicy, classify, next_delay, should_retry
+from quidz.events import Provider
+from quidz.inbox import DeliveryState, claim, drain, drain_until_idle
+from quidz.ledger import apply_delivery
+
+
+def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock) -> str:
+    return claim(
+        conn, provider=Provider.STRIPE, identity=identity, raw=raw, headers={}, clock=clock
+    ).delivery_id
+
+
+def delivery(conn: sqlite3.Connection) -> sqlite3.Row:
+    return conn.execute("SELECT state, attempts, reason_code FROM deliveries").fetchone()
+
+
+def test_a_transient_failure_backs_off_then_succeeds(
+    conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No real sleep anywhere: the FakeClock records the schedule the drain loop waited out."""
+    attempts = {"count": 0}
+
+    def flaky(connection: sqlite3.Connection, delivery_id: str, event: object) -> object:
+        attempts["count"] += 1
+        if attempts["count"] <= 2:
+            raise sqlite3.OperationalError("database is locked")
+        return apply_delivery(connection, delivery_id, event)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(inbox, "apply_delivery", flaky)
+    clock = FakeClock()
+    policy = RetryPolicy(seed=0)
+    take(conn, "evt_auth", authorize_body("evt_auth"), clock)
+    drain_until_idle(conn, clock=clock, policy=policy)
+
+    # approx, because the schedule is stored as an absolute next_attempt_at and the wait is
+    # the difference of two floats rather than the delay itself.
+    expected = [next_delay(policy, attempt, random.Random(0)) for attempt in (1, 2)]
+    effects = conn.execute("SELECT count(*) AS n FROM effects").fetchone()["n"]
+    assert (clock.slept, delivery(conn)["state"], effects) == (
+        pytest.approx(expected),
+        DeliveryState.APPLIED,
+        1,
+    )
+
+
+def test_a_permanent_failure_dead_letters_on_the_first_attempt(conn: sqlite3.Connection) -> None:
+    clock = FakeClock()
+    take(conn, "evt_bad", b'{"id":"evt_bad","type":"charge.captured"}', clock)
+    report = drain(conn, clock=clock, policy=RetryPolicy())
+    row = delivery(conn)
+    assert (report.dead_lettered, row["state"], row["attempts"], row["reason_code"]) == (
+        1,
+        DeliveryState.DEAD_LETTERED,
+        1,
+        "schema_invalid",
+    )
+
+
+def test_retries_are_bounded_by_max_attempts() -> None:
+    # The anti runaway regression: without this bound one malformed event class becomes a
+    # self amplifying retry storm.
+    policy = RetryPolicy(max_attempts=5)
+    reason = REASON_CODES["downstream_unavailable"]
+    allowed = [should_retry(policy, reason, attempt, budget_used=0) for attempt in (4, 5, 6)]
+    assert allowed == [True, False, False]
+
+
+def test_the_global_budget_stops_retries_below_max_attempts() -> None:
+    policy = RetryPolicy(max_attempts=5, budget_per_minute=100)
+    reason = REASON_CODES["downstream_unavailable"]
+    assert should_retry(policy, reason, 1, budget_used=100) is False
+
+
+def test_jitter_from_a_seeded_generator_reproduces_exactly() -> None:
+    policy = RetryPolicy()
+    first = [next_delay(policy, attempt, rng) for rng in [random.Random(0)] for attempt in range(6)]
+    second = [
+        next_delay(policy, attempt, rng) for rng in [random.Random(0)] for attempt in range(6)
+    ]
+    assert first == second
+
+
+def test_the_delay_never_exceeds_the_ceiling() -> None:
+    policy = RetryPolicy(base_seconds=1.0, max_seconds=300.0)
+    rng = random.Random(7)
+    assert all(next_delay(policy, attempt, rng) <= 300.0 for attempt in range(40))
+
+
+def test_an_unrecognised_failure_is_retryable_with_a_cap_and_never_dropped() -> None:
+    reason = classify(RuntimeError("something new from the provider"))
+    assert (reason.code, reason.retryable, reason.max_attempts) == ("unknown", True, 3)
+
+
+def test_a_redelivered_message_resolves_to_a_no_op_not_a_second_effect(
+    conn: sqlite3.Connection,
+) -> None:
+    clock = FakeClock()
+    delivery_id = take(conn, "evt_auth", authorize_body("evt_auth"), clock)
+    drain(conn, clock=clock, policy=RetryPolicy())
+    # The delivery is put back on the queue, which is what a provider retry after a lost
+    # acknowledgement looks like from this side.
+    conn.execute(
+        "UPDATE deliveries SET state = ?, next_attempt_at = NULL WHERE delivery_id = ?",
+        (DeliveryState.CLAIMED, delivery_id),
+    )
+    report = drain(conn, clock=clock, policy=RetryPolicy())
+    effects = conn.execute("SELECT count(*) AS n FROM effects").fetchone()["n"]
+    assert (report.noop_duplicate, report.dead_lettered, effects) == (1, 0, 1)
