@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from quidz.cli import build_parser, main
+from quidz.cli import INSTALL_COMMAND, build_parser, main
 
-README = Path(__file__).resolve().parent.parent / "README.md"
+TESTS = Path(__file__).resolve().parent
+README = TESTS.parent / "README.md"
 
 # The --db value the README's Quickstart passes, and therefore the path its output block
 # prints. This run uses tmp_path instead and substitutes, rather than skipping those two lines:
@@ -118,6 +119,27 @@ def test_the_quickstart_runs_the_command_that_produced_the_output_block() -> Non
     """
     quickstart = next(argv for argv in documented_commands() if argv[:1] == ["demo"])
     assert quickstart == ["demo", "--scenario", "adversarial", "--db", README_DB]
+
+
+def test_every_test_the_readme_names_still_exists() -> None:
+    """The invariant table's whole value is that each row names the test that pins it.
+
+    Rename a test and the row points at nothing, which is worse than no citation: it reads as
+    evidence right up until somebody goes looking for it.
+    """
+    text = README.read_text(encoding="utf-8")
+    cited = set(re.findall(r"`(test_\w+\.py)::(\w+)`", text))
+    missing = sorted(
+        f"{module}::{name}"
+        for module, name in cited
+        if f"def {name}(" not in (TESTS / module).read_text(encoding="utf-8")
+    )
+    assert (len(cited), missing) == (12, [])
+
+
+def test_the_install_command_the_cli_prints_is_the_one_the_readme_gives() -> None:
+    # Two places tell a reader how to install, and the CLI's copy is the one nobody re-reads.
+    assert INSTALL_COMMAND in README.read_text(encoding="utf-8")
 
 
 def test_the_readme_cites_every_source_the_design_depends_on() -> None:

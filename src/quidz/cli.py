@@ -44,7 +44,7 @@ from quidz.reconcile import (
 from quidz.sim import SCENARIOS, BreakMode, Delivery, Simulator
 from quidz.verify import SignatureError, StaleTimestamp
 
-__all__ = ["build_parser", "main"]
+__all__ = ["INSTALL_COMMAND", "build_parser", "main"]
 
 # Deliveries arrive at distinct moments, so receipt order is the drain order. Without this
 # every delivery shares one received_at and the queue drains in identifier order instead.
@@ -53,6 +53,10 @@ _RECEIPT_INTERVAL = 0.05
 # so that parked deliveries age past park_max_age_seconds and the report has something to say.
 _RECONCILE_AFTER = 1_200.0
 _SEVERITY_ORDER = {Severity.INFO: 0, Severity.WARN: 1, Severity.BREAK: 2, Severity.CRITICAL: 3}
+# The one install command the README gives, kept identical here because --http needs httpx from
+# the dev group as well as fastapi from the server extra, so --all-extras on its own is short by
+# one package and sends the reader round the loop a second time.
+INSTALL_COMMAND = "uv sync --all-extras --dev"
 
 
 class CliError(Exception):
@@ -228,7 +232,7 @@ def _receive_over_http(
         from quidz.app import create_app
     except ImportError as exc:  # pragma: no cover - exercised only without the extra
         raise CliError(
-            "--http needs the server extra; install it with: uv sync --all-extras"
+            f"--http needs the server extra and httpx; install both with: {INSTALL_COMMAND}"
         ) from exc
 
     app = create_app(

@@ -31,16 +31,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `quidz.reconcile`: the thirteen-member drift taxonomy, the two-source classifier, a fail-closed
   gate scoped to the affected payments with materiality thresholds and an audited break-glass,
   and stable JSON and text report renderers.
-- `quidz.dlq`: typed reason codes, full-jitter bounded backoff from a seeded generator, and an
-  `unknown` default that is retryable with a cap.
-- `quidz.sim`: a synthetic provider with six break modes, a payment list and a settlement report,
-  generating no card-like data.
+- `quidz.dlq`: typed reason codes, full-jitter bounded backoff from an unpredictable generator
+  that only a test seeds, and an `unknown` default that is retryable with a cap.
+- `quidz.sim`: a synthetic provider with seven break modes, a payment list and a settlement
+  report, generating no card-like data.
 - `quidz.metrics`: twelve operational counters as an allowlist.
 - `quidz.cli`: `quidz demo`, `quidz replay` and `quidz reconcile`, with the exit-code contract
   documented in the README.
 - `quidz.app`: an optional FastAPI adapter behind the `server` extra, the only module permitted
   to import a web framework.
-- 116 tests, deterministic and network-free, including an import-boundary scan, a forced INSERT
+- 140 tests, deterministic and network-free, including an import-boundary scan, a forced INSERT
   race across eight threads, and a 20 permutation seeded replay of one event stream.
-
-[0.1.0]: https://github.com/PNX89/QUIDZ/releases/tag/v0.1.0
+- `mypy --strict` over the package and the tests on every interpreter leg, so the `py.typed`
+  marker the wheel ships is a checked promise rather than an asserted one.

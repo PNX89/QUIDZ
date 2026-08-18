@@ -1,5 +1,8 @@
 # QUIDZ
 
+**A delivery that arrives twice, out of order, or never must not move money twice. This is the
+ledger that makes sure of it, and the reconciliation that proves it afterwards.**
+
 [![CI](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml/badge.svg)](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20to%203.14-blue)](https://github.com/PNX89/QUIDZ)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -10,6 +13,11 @@ them to an idempotent ledger, and reports the drift between the event stream, th
 a settlement report.
 
 Framework-free core, standard library only, no network in any code path or test.
+
+QUESTZ in the same toolset also ends in a fail-closed gate behind a jittered retry, and argues
+something different with it: there is no ledger behind a browser check, so repetition there is
+never intrinsically safe and the question is how to give up cleanly. Here the ledger is what
+makes a re-delivery a no-op, and the retry is a corollary of that rather than the idea.
 
 ## The outage this is built around
 
@@ -403,26 +411,53 @@ so it is modelled as an attempt that failed and left `authorized_minor` at 0.
 <https://docs.stripe.com/payments/paymentintents/lifecycle>, <https://docs.stripe.com/refunds>,
 <https://docs.adyen.com/reporting/settlement-reconciliation/transaction-level/settlement-details-report>
 
-**One capture, and a hold that expires.** A partial capture releases the remainder, so
-`apply_effect` sets `authorized_minor = captured_minor` and any later capture raises.
-Multicapture and overcapture are separate opt-in provider features and are not modelled. An
-authorization is not open-ended either, and expiry silently releases the funds:
+**One capture, and a hold that expires.** Stripe's own wording is that "a partial capture
+automatically releases the remaining amount" and that "if you partially capture a payment, you
+can't perform another capture for the difference". So `apply_effect` refuses a second capture
+outright, on a `captured_minor > 0` guard rather than on an amount comparison: there is nothing
+left to capture, whatever the second amount is. `authorized_minor` deliberately keeps the
+original authorization rather than being rewritten down to the captured amount, because it is
+what makes `partially_captured` derivable at all and it is the field
+`RemotePayment.authorized_minor` is mapped from, so both sides of the reconciliation compare
+like with like. The `33.50 USD AUTHORIZED / 22.11 USD CAPTURED` row in the demo output is that
+state. Multicapture, overcapture and incremental authorization are separate opt-in provider
+features and are not modelled: a second authorization raises rather than being folded in, and a
+larger hold has to arrive as an adjustment carrying the new total.
 
-| Brand | Card not present | Card present |
-|---|---|---|
-| Visa | 7 days | 5 days, which is exactly 4 days 18 hours |
-| Mastercard | 7 days | 2 days |
-| American Express | 7 days | 2 days |
-| Discover | 7 days | 2 days |
+An authorization is not open-ended either, and expiry silently releases the funds. The window
+is per brand, and for Visa also per who initiated the transaction:
 
-JPY transactions can run up to 30 days. This is modelled as one `EXPIRE` effect; there is no
-scheduler here. <https://docs.stripe.com/payments/place-a-hold-on-a-payment-method>
+| Brand | Card not present, merchant-initiated | Card not present, customer-initiated | Card present |
+|---|---|---|---|
+| Visa | 5 days, exactly 4 days 18 hours | 7 days | 5 days, exactly 4 days 18 hours |
+| Mastercard | 7 days | 7 days | 2 days |
+| American Express | 7 days | 7 days | 2 days |
+| Discover | 7 days | 7 days | 2 days |
+
+Visa merchant-initiated is the short one, and it is the one a recurring charge lands in, so a
+job that assumes seven days across the board loses those holds silently on day five. Nor is it
+the caller's choice: Stripe and the network classify a transaction as merchant-initiated or
+customer-initiated from signals of cardholder participation, so `off_session: true` with a CVC
+present can still be treated as customer-initiated. A Japan-based account can hold
+JPY-denominated Visa, Mastercard, JCB, Diners Club and Discover transactions for up to 30 days;
+non-JPY and American Express follow the standard windows. All of it is modelled here as one
+`EXPIRE` effect, and there is no scheduler.
+<https://docs.stripe.com/payments/place-a-hold-on-a-payment-method>
 
 **Ordering is a rank, not a timestamp.** Stripe states that it "doesn't guarantee the delivery of
 events in the order that they're generated", and Adyen documents duplicates whose `eventDate`
 differs, so ordering on event time is ordering on a field neither provider will stand behind. A
-payment carries a monotonic state rank that never regresses toward a less terminal value, and
-within a rank the newest event wins by its own `created` or sequence value. A capture arriving
+payment carries a state rank that a late delivery cannot drag back toward a less terminal value,
+and within a rank the newest event wins by its own `created` or sequence value.
+
+The ratchet has exactly two exemptions, and they are the two effects that are regressive by
+nature: a refund that failed and a refund that was reversed, both of which are money coming back
+to the merchant. Adyen sends `REFUND_FAILED` and `REFUNDED_REVERSED` for them and Stripe sends
+`charge.refund.updated` with `status: failed`. Ratcheting those would make them impossible on a
+fully refunded payment, which is their commonest shape, and `IllegalTransition` is non-retryable,
+so the refusal would dead-letter on the first attempt and the money would silently never land.
+For those two the rank follows the balance back down, with the kind's own rank as the floor, so a
+late cancellation is still refused. A capture arriving
 before its authorization is not an error: it raises `PrematureEvent`, which the inbox parks with
 a `parked_until`. Parking and dead-lettering are two states of one inbox row, not two mechanisms
 and not two tables. Parking is bounded, because unbounded parking is a silent money-loss channel
@@ -512,9 +547,12 @@ uv sync --all-extras --dev
 uv run pytest -q
 uv run ruff check .
 uv run ruff format --check .
+uv run mypy
 ```
 
-116 tests, deterministic, seeded, no network, the whole suite under a second on this machine.
+140 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+second on this machine. `mypy` runs `--strict` over both the package and the tests, because the
+wheel ships `py.typed` and that is a promise to whoever installs it.
 `pyproject.toml` sets `filterwarnings = ["error"]` with an empty ignore list, which is what makes
 the `server` extra's lower bounds load-bearing rather than decorative: below roughly
 `fastapi>=0.128` with `pydantic>=2.12.1`, FastAPI's pydantic v1 compatibility shim emits a
@@ -534,4 +572,9 @@ uv python install 3.11 3.12 3.13
 
 MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Quelin Zammit.
 
-Part of the Q...Z toolset: QUACKZ, QUOTEZ, QUELLZ, QUIDZ, QUESTZ.
+Part of the Q...Z toolset, five tools for finding the failure that does not announce itself:
+[QUACKZ](https://github.com/PNX89/QUACKZ), backtest overfitting checks;
+[QUOTEZ](https://github.com/PNX89/QUOTEZ), a read-only market data MCP server;
+[QUELLZ](https://github.com/PNX89/QUELLZ), prompt-injection containment measured against
+utility; QUIDZ, this one; and [QUESTZ](https://github.com/PNX89/QUESTZ), browser drift
+detection.
