@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
+import importlib
+import pkgutil
 import subprocess
 from pathlib import Path
+from types import ModuleType
 
 from quidz.reconcile import GatePolicy, gate, to_json
 from test_reconcile import local, remote, run
@@ -39,6 +43,37 @@ def tracked_files() -> list[Path]:
     ]
 
 
+def package_modules() -> list[ModuleType]:
+    modules: list[ModuleType] = []
+    for found in pkgutil.iter_modules([str(PACKAGE)]):
+        try:
+            modules.append(importlib.import_module(f"quidz.{found.name}"))
+        except ImportError:
+            # quidz.app is the one module that needs the optional server extra. Everything
+            # else is standard library only, so nothing else can be skipped by this.
+            continue
+    return modules
+
+
+def dataclass_defaults() -> list[tuple[str, str, object]]:
+    """(class, field, default) for every plain default on every dataclass in the package."""
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, object]] = []
+    for module in package_modules():
+        for value in vars(module).values():
+            if not isinstance(value, type) or not dataclasses.is_dataclass(value):
+                continue
+            if not value.__module__.startswith("quidz."):
+                continue
+            for entry in dataclasses.fields(value):
+                key = (value.__qualname__, entry.name)
+                if entry.default is dataclasses.MISSING or key in seen:
+                    continue
+                seen.add(key)
+                out.append((value.__qualname__, entry.name, entry.default))
+    return out
+
+
 def test_only_the_adapter_reaches_for_a_web_framework() -> None:
     offenders = {
         module.name: sorted(SERVER_ONLY & top_level_imports(module))
@@ -58,6 +93,24 @@ def test_no_tracked_file_carries_an_em_dash_or_an_en_dash() -> None:
             continue
         if EM_DASH in text or EN_DASH in text:
             offenders.append(str(path.relative_to(ROOT)))
+    assert offenders == []
+
+
+def test_no_dataclass_default_is_one_python_3_11_refuses_to_import() -> None:
+    """3.11 rejects any dataclass default whose class is unhashable; 3.12 relaxed the rule.
+
+    A MappingProxyType default therefore imports on 3.12 and up and raises ValueError at class
+    creation on 3.11, which is a supported version here and a required CI leg, so the package
+    is uninstallable there while every local run stays green. This reproduces 3.11's own rule
+    on whatever interpreter runs the suite, which is the only way one leg's failure is visible
+    from the others.
+    """
+    defaults = dataclass_defaults()
+    # Proves the scan reaches the class the bug was in, so an empty result cannot pass quietly.
+    assert ("GatePolicy", "fee_tolerance_bps") in {(owner, name) for owner, name, _ in defaults}
+    offenders = [
+        f"{owner}.{name}" for owner, name, default in defaults if default.__class__.__hash__ is None
+    ]
     assert offenders == []
 
 

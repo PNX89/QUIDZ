@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Literal
@@ -121,6 +121,12 @@ _SEVERITY_ORDER: Mapping[Severity, int] = MappingProxyType(
     {Severity.INFO: 0, Severity.WARN: 1, Severity.BREAK: 2, Severity.CRITICAL: 3}
 )
 
+# Handed to GatePolicy through default_factory rather than sat on the field as a default.
+# Python 3.11 rejects any dataclass default whose class is unhashable, and mappingproxy is one,
+# so a bare default here raises ValueError at import time on the oldest supported interpreter.
+# 3.12 narrowed that check to list, dict and set, which is why the failure hides on 3.12 and up.
+_NO_SEVERITY_OVERRIDES: Mapping[DriftKind, Severity] = MappingProxyType({})
+
 
 @dataclass(frozen=True, slots=True)
 class RemotePayment:
@@ -163,7 +169,9 @@ class GatePolicy:
     materiality_value_minor: int = 10_000
     scope: Literal["payment", "currency", "batch"] = "payment"
     break_glass: BreakGlass | None = None
-    severity_overrides: Mapping[DriftKind, Severity] = MappingProxyType({})
+    severity_overrides: Mapping[DriftKind, Severity] = field(
+        default_factory=lambda: _NO_SEVERITY_OVERRIDES
+    )
 
 
 @dataclass(frozen=True, slots=True)
