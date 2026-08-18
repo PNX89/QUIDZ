@@ -45,7 +45,7 @@ packages = ["src/quidz"]
 # httpx drives the --http demo flag through ASGITransport. httpx2 is what starlette 1.6
 # requires for fastapi.testclient.TestClient, and because filterwarnings = ["error"] has an
 # empty ignore list, starlette's deprecation of httpx there is a failing test, not a note.
-dev = ["pytest>=8", "httpx>=0.28", "httpx2>=2.10", "ruff>=0.14", "quidz[server]"]
+dev = ["pytest>=8", "httpx>=0.28", "httpx2>=2.10", "mypy>=1.18", "ruff>=0.14", "quidz[server]"]
 
 [tool.ruff]
 line-length = 100
@@ -56,6 +56,16 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N"]
 # N818 wants every exception name to end in Error. BadSignature, StaleTimestamp and
 # PrematureEvent read better at the raise site and are the names used in the README.
 ignore = ["N818"]
+
+[tool.mypy]
+# The wheel ships py.typed and the metadata claims Typing :: Typed, which is a promise to
+# every consumer that these annotations hold. Nothing but a checker can keep that promise, and
+# strict is the only setting under which an untyped function is a failure rather than a hole.
+strict = true
+files = ["src/quidz", "tests"]
+# tests/ is a rootdir package with no __init__.py, matching how pytest imports it.
+mypy_path = ["src", "tests"]
+explicit_package_bases = true
 
 [tool.pytest.ini_options]
 minversion = "8.0"

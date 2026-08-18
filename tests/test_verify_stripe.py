@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+from typing import Any
 
 import pytest
 
@@ -101,9 +102,9 @@ def test_compare_digest_is_called_with_two_bytes_arguments(
     calls: list[tuple[object, object]] = []
     real = hmac.compare_digest
 
-    def spy(a: object, b: object) -> bool:
+    def spy(a: Any, b: Any) -> bool:
         calls.append((a, b))
-        return real(a, b)  # type: ignore[arg-type]
+        return bool(real(a, b))
 
     monkeypatch.setattr(hmac, "compare_digest", spy)
     verify_stripe(RAW, header(RAW, NOW, PRIMARY), [PRIMARY], now=NOW)

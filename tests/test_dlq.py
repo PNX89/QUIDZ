@@ -28,7 +28,10 @@ def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock) 
 
 
 def delivery(conn: sqlite3.Connection) -> sqlite3.Row:
-    return conn.execute("SELECT state, attempts, reason_code FROM deliveries").fetchone()
+    row: sqlite3.Row = conn.execute(
+        "SELECT state, attempts, reason_code FROM deliveries"
+    ).fetchone()
+    return row
 
 
 def test_a_transient_failure_backs_off_then_succeeds(

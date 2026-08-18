@@ -46,6 +46,12 @@ jobs:
       - name: Format
         run: uv run ruff format --check .
 
+      # The wheel ships py.typed, so the annotations are a promise to every consumer. This runs
+      # on every leg rather than once, because what type checks on 3.14 is not what type checks
+      # on 3.11: the 3.11 leg is where a version-specific typing mistake shows up.
+      - name: Types
+        run: uv run mypy
+
       - name: Test
         run: uv run pytest -q
 

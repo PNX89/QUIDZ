@@ -468,7 +468,9 @@ def _replay(args: argparse.Namespace) -> int:
     return 0
 
 
-def _read_log(path: Path) -> tuple[list[tuple[Provider, str, bytes, dict[str, str]]], dict | None]:
+def _read_log(
+    path: Path,
+) -> tuple[list[tuple[Provider, str, bytes, dict[str, str]]], dict[str, str] | None]:
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:

@@ -6,11 +6,13 @@ from conftest import authorize_body, capture_body
 from quidz.clock import FakeClock
 from quidz.dlq import RetryPolicy
 from quidz.events import Provider
-from quidz.inbox import DeliveryState, claim, drain, drain_until_idle, parked_events
+from quidz.inbox import ClaimResult, DeliveryState, claim, drain, drain_until_idle, parked_events
 from quidz.reconcile import DriftKind, GatePolicy, reconcile
 
 
-def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock, **kwargs: float):
+def take(
+    conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock, **kwargs: float
+) -> ClaimResult:
     return claim(
         conn,
         provider=Provider.STRIPE,
@@ -23,9 +25,11 @@ def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock, 
 
 
 def state_of(conn: sqlite3.Connection, delivery_id: str) -> str:
-    return conn.execute(
+    row = conn.execute(
         "SELECT state FROM deliveries WHERE delivery_id = ?", (delivery_id,)
-    ).fetchone()["state"]
+    ).fetchone()
+    state: str = row["state"]
+    return state
 
 
 def test_the_first_claim_of_an_identity_is_new(conn: sqlite3.Connection) -> None:
