@@ -49,18 +49,18 @@ this block against what it printed, every line of it, so the block cannot drift 
 QUIDZ demo
   scenario      adversarial
   seed          0
-  breaks        amount-mismatch, drop, duplicate, reorder, replay, tamper
+  breaks        amount-mismatch, drop, duplicate, reorder, replay, tamper, unmodelled
   transport     in-process, no socket
   database      /tmp/quidz-demo/quidz.db
   delivery log  /tmp/quidz-demo/quidz.db.jsonl
 
 RECEIPT
-  deliveries    16
-  accepted      13   duplicate 0   in_progress 1
+  deliveries    17
+  accepted      14   duplicate 0   in_progress 1
   rejected      2   (signature 1, replay 1)
 
 DRAIN
-  applied 11   noop_duplicate 1   parked 2   dead_lettered 0   retried 0
+  applied 11   noop_duplicate 1   parked 2   dead_lettered 1   retried 2
 
 LEDGER
   PAYMENT                     AUTHORIZED        CAPTURED        REFUNDED  STATUS
@@ -71,7 +71,7 @@ LEDGER
   pi_W7bXVRVMG8MCWwSh           5300 JPY           0 JPY           0 JPY  authorized
 
 EXCEPTION REPORT
-  generated_at  1787012409
+  generated_at  1787012407
   findings      12  (CRITICAL=1 BREAK=6 WARN=2 INFO=3)
   outbound      BLOCKED
   ingest        open
@@ -79,32 +79,32 @@ EXCEPTION REPORT
   rationale     1 critical and 6 break findings, exposure 31022 minor units; outbound blocked for 4 id(s) under scope=payment
 
   SEVERITY KIND                      PAYMENT                DELTA  DETAIL
-  CRITICAL missing_locally           order-CXSHRQTY         12100  order-CXSHRQTY is at the provider and not in the ledger, 346808s old
+  CRITICAL missing_locally           order-CXSHRQTY         12100  order-CXSHRQTY is at the provider and not in the ledger, 346806s old
   BREAK    amount_mismatch           pi_C29cZ86wXAsjLR2X     -1000  pi_C29cZ86wXAsjLR2X net position differs by -1000 USD minor units
   BREAK    amount_mismatch           pi_W7bXVRVMG8MCWwSh     -5300  pi_W7bXVRVMG8MCWwSh net position differs by -5300 JPY minor units
   BREAK    fee_gross_net             pi_W7bXVRVMG8MCWwSh      5122  settlement net 5122 against capture gross 0 on pi_W7bXVRVMG8MCWwSh is 10000 bps, tolerance 500 bps
-  BREAK    parked_stale              order-CXSHRQTY             -  a delivery for order-CXSHRQTY has been parked 1208s waiting for its prerequisite, limit 900s
+  BREAK    parked_stale              order-CXSHRQTY             -  a delivery for order-CXSHRQTY has been parked 1206s waiting for its prerequisite, limit 900s
   BREAK    status_mismatch           pi_W7bXVRVMG8MCWwSh         -  pi_W7bXVRVMG8MCWwSh is authorized in the ledger and captured at the provider [remote_ahead]
-  BREAK    unsettled_past_sla        order:MB9WJKNY         19600  order:MB9WJKNY captured 19600 GBP, 346808s old and absent from the settlement report
+  BREAK    unsettled_past_sla        order:MB9WJKNY         19600  order:MB9WJKNY captured 19600 GBP, 346806s old and absent from the settlement report
   WARN     unknown_remote_row        EYQCVTMRYEBHXNR9           -  settlement row EYQCVTMRYEBHXNR9 joins to no ledger payment
   WARN     unknown_remote_row        PAYOUT_BATCH_0001          -  settlement row PAYOUT_BATCH_0001 joins to no ledger payment
   INFO     fee_gross_net             pi_C29cZ86wXAsjLR2X       -89  settlement net 2122 against capture gross 2211 on pi_C29cZ86wXAsjLR2X is 403 bps, tolerance 500 bps
   INFO     fee_gross_net             pi_PCSkRc69KhZqGkJV      -397  settlement net 12453 against capture gross 12850 on pi_PCSkRc69KhZqGkJV is 309 bps, tolerance 500 bps
-  INFO     in_flight                 order-YBMEWG9S             -  order-YBMEWG9S diverges but is 2936s old, inside the 3600s grace window
+  INFO     in_flight                 order-YBMEWG9S             -  order-YBMEWG9S diverges but is 2934s old, inside the 3600s grace window
 
 COUNTERS
-  events_received                         16
+  events_received                         17
   signature_rejected                       1
   replay_rejected                          1
   deduped                                  1
   applied                                 11
   parked                                   2
-  dead_lettered                            0
+  dead_lettered                            1
   drift_info                               3
   drift_warn                               2
   drift_break                              6
   drift_critical                           1
-  oldest_unresolved_drift_seconds     346808
+  oldest_unresolved_drift_seconds     346806
 ```
 
 Every identifier, amount and settlement row above is synthetic and seeded, and the seed is
@@ -116,7 +116,14 @@ quidz demo --break tamper       # a body edited after signing, signature_rejecte
 quidz demo --break duplicate    # one logical effect, two event ids, deduped goes to 1
 quidz demo --break replay       # a valid signature outside the window, replay_rejected
 quidz demo --break drop         # a capture whose authorization never arrives, parked
+quidz demo --break unmodelled   # an event type the ledger does not model, dead_lettered
 ```
+
+That last one is the poison message the outage above was made of, and it is the only path to
+the dead-letter queue: a real Stripe event type this ledger has no rule for. The front door
+stores it rather than refusing it, because refusing at the edge is how a provider's new event
+type disappears. It then fails identically on every attempt, which is exactly what a cap is
+for: two retries, then `dead_lettered`, with `reason_code=unknown_event_type` on the row.
 
 `quidz reconcile --db PATH --fail-on critical` re-runs the reconciliation against a database an
 earlier demo produced and exits 1 on a CRITICAL, which is the shape a CI gate would use.
@@ -179,7 +186,7 @@ sequenceDiagram
 | `quidz.ledger` | one canonical event applied transactionally to the effects table and the aggregate |
 | `quidz.reconcile` | the drift taxonomy, the classifier, the scoped gate, the report renderers |
 | `quidz.dlq` | reason codes, full-jitter backoff, retry classification |
-| `quidz.sim` | the synthetic provider, six break modes, the settlement file |
+| `quidz.sim` | the synthetic provider, seven break modes, the settlement file |
 | `quidz.metrics` | the twelve operational counters, as an allowlist |
 | `quidz.cli` | `demo`, `replay`, `reconcile` |
 | `quidz.app` | the FastAPI adapter, the only module permitted to import a web framework |

@@ -9,15 +9,12 @@ from quidz.sim import BreakMode, Simulator
 CARD_LIKE = re.compile(r"(?<!\d)\d{13,19}(?!\d)")
 
 
-def test_the_simulator_exposes_exactly_six_break_modes() -> None:
-    assert [mode.value for mode in BreakMode] == [
-        "duplicate",
-        "replay",
-        "reorder",
-        "drop",
-        "amount-mismatch",
-        "tamper",
-    ]
+def test_the_adversarial_scenario_applies_every_break_mode() -> None:
+    # The point of the scenario, and the reason the flagship demo output is worth reading: a
+    # break mode nobody wires into it is a mechanism nothing demonstrates.
+    simulator = Simulator(seed=0)
+    simulator.deliveries("adversarial")
+    assert set(simulator.applied_breaks) == set(BreakMode)
 
 
 def test_the_same_seed_produces_byte_identical_deliveries() -> None:

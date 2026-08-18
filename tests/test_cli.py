@@ -35,6 +35,18 @@ def test_demo_with_a_tampered_delivery_rejects_it_and_still_exits_zero(
     assert counter(capsys.readouterr().out, "signature_rejected") > 0
 
 
+def test_the_unmodelled_break_mode_retries_then_dead_letters(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The mechanism the whole README is built around, exercised end to end: an event type this
+    # ledger does not model is stored rather than refused at the door, retried under the cap
+    # of three, and dead lettered where a human sees it rather than dropped.
+    run_demo(tmp_path, "--break", "unmodelled")
+    output = capsys.readouterr().out
+    assert "dead_lettered 1   retried 2" in output
+    assert counter(output, "dead_lettered") == 1
+
+
 def test_reconcile_fails_on_a_critical_finding(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

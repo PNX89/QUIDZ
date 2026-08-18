@@ -45,6 +45,7 @@ class BreakMode(StrEnum):
     DROP = "drop"
     AMOUNT_MISMATCH = "amount-mismatch"
     TAMPER = "tamper"
+    UNMODELLED = "unmodelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,6 +248,8 @@ class Simulator:
             out.extend(self._duplicate_deliveries())
         if BreakMode.REPLAY in self._breaks:
             out.append(self._replayed_authorization())
+        if BreakMode.UNMODELLED in self._breaks:
+            out.append(self._unmodelled_event())
         return out
 
     def _payment_deliveries(self, booked: _Booked) -> list[Delivery]:
@@ -370,6 +373,28 @@ class Simulator:
             salt="dup",
         )
         return [original, second_event]
+
+    def _unmodelled_event(self) -> Delivery:
+        """A correctly signed delivery of a real event type this ledger does not model.
+
+        The poison message the retry story is built around, and the only break mode that
+        reaches the dead letter queue. The front door reads the delivery identity and nothing
+        else, so it is stored rather than refused at the edge; the adapter then raises
+        UnknownEventType on every drain attempt, which is retryable with a cap of three and
+        dead letters after two retries, where a human sees it. A silent drop instead would
+        leave the ledger quietly wrong the day a provider ships a new type.
+        """
+        booked = self._book[_REORDER_INDEX]
+        return self._stripe(
+            "payment_intent.requires_action",
+            int(booked.created_at) + 60,
+            {
+                "id": booked.payment_id,
+                "object": "payment_intent",
+                "amount": booked.authorized,
+                "currency": booked.currency.lower(),
+            },
+        )
 
     def _replayed_authorization(self) -> Delivery:
         """A correctly signed delivery captured earlier and re-sent outside the window."""
