@@ -63,6 +63,7 @@ from quidz.reconcile import (
     to_json,
     to_text,
 )
+from quidz.sim import BreakMode, Delivery, Simulator
 from quidz.store import SCHEMA_VERSION, connect, init_schema, write_tx
 from quidz.verify import (
     STRIPE_DEFAULT_TOLERANCE_SECONDS,
@@ -91,10 +92,12 @@ __all__ = [
     "ApplyOutcome",
     "BadSignature",
     "BreakGlass",
+    "BreakMode",
     "CanonicalEvent",
     "ClaimResult",
     "Clock",
     "CurrencyMismatch",
+    "Delivery",
     "DeliveryState",
     "Direction",
     "DrainReport",
@@ -119,6 +122,7 @@ __all__ = [
     "SettlementRow",
     "Severity",
     "SignatureError",
+    "Simulator",
     "StaleTimestamp",
     "SystemClock",
     "UnknownEventType",
