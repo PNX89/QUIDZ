@@ -206,7 +206,7 @@ sequenceDiagram
 | 1 | Signature verification over the exact signed bytes, two real schemes, constant-time compare | A forged or edited body accepted because the verifier trusted a scheme prefix, or a body some parser re-encoded before the verifier saw it | `test_verify_stripe.py::test_v0_scheme_is_ignored_so_a_downgrade_attempt_is_rejected`, `test_verify_adyen.py::test_documented_signing_string_is_reproduced_exactly` |
 | 2 | Replay defence where a timestamp is signed, identity dedup where it is not | An old but validly signed delivery replayed into the ledger, and the false belief that a tolerance window is available on every provider | `test_verify_stripe.py::test_tolerance_boundary_passes_and_one_second_past_it_is_stale`, `test_verify_adyen.py::test_no_timestamp_is_consulted_anywhere_in_the_adyen_path` |
 | 3 | Two-level idempotency, the claim and the effect in one transaction, with a leased state | A double capture from two Event objects describing one change, and the silent loss of claiming a key then crashing before the effect lands | `test_ledger.py::test_two_event_ids_for_one_effect_collide_on_the_business_key`, `test_inbox.py::test_a_crash_between_claim_and_apply_leaves_work_to_redo_not_a_false_success` |
-| 4 | Ordering tolerance through a monotonic rank, plus amount conservation | A late delivery regressing a payment to a less terminal state, an over-capture, or an over-refund | `test_ledger.py::test_twenty_seeded_permutations_reach_one_terminal_aggregate`, `test_model.py::test_over_capture_violates_amount_conservation` |
+| 4 | Ordering tolerance through a state rank a late delivery cannot drag backwards, plus amount conservation | A late delivery regressing a payment to a less terminal state, an over-capture, or an over-refund | `test_ledger.py::test_twenty_seeded_permutations_reach_one_terminal_aggregate`, `test_model.py::test_over_capture_violates_amount_conservation` |
 | 5 | Two-source reconciliation and a gate scoped to the affected payments | A settlement file joined on the wrong key, and one drifting row halting an entire payout batch | `test_settlement.py::test_the_settlement_join_is_on_the_psp_reference_and_not_the_payment_id`, `test_gate.py::test_blocking_is_scoped_to_the_affected_payment_and_spares_the_rest` |
 | 6 | Poison-message handling: typed reasons, bounded jittered backoff, a global budget | The retry storm above, and a redelivery landing a second ledger effect instead of resolving to a no-op | `test_dlq.py::test_retries_are_bounded_by_max_attempts`, `test_dlq.py::test_a_redelivered_message_resolves_to_a_no_op_not_a_second_effect` |
 
@@ -304,6 +304,13 @@ means the settlement file is late, and the action is to wait out the SLA and re-
 `quidz reconcile`. `MISSING_LOCALLY`, `DUPLICATE_REMOTE` or `CURRENCY_MISMATCH` mean money moved
 that the ledger cannot account for, which is an escalation rather than a tuning exercise.
 
+A non-zero `dead_lettered` counter is a separate read. It is not drift by itself, it is an effect
+that never reached the ledger, so the drift it causes shows up in the report anyway through the
+provider payment list. Read the `reason_code` on the row: `unknown_event_type` means the provider
+has shipped something this ledger has no rule for and the fix is a code change, while
+`illegal_transition` on an authorization means two of them arrived for one reference, which is a
+double authorization and an escalation.
+
 If the business genuinely has to move money before the drift is resolved, file a break-glass: a
 named approver, a written reason, an `expires_at`, and the explicit list of ids it covers. It
 auto-expires, an expired one is inert, and both facts appear in the report and the JSON output,
@@ -318,8 +325,11 @@ one, and it is how drift stops being visible at all.
 **Framework-free core, FastAPI in an extra.** Everything except `quidz.app` imports the standard
 library only. `tests/test_boundaries.py` walks the AST of every module and fails if anything but
 `quidz/app.py` imports `fastapi`, `starlette`, `pydantic` or `uvicorn`, or if `quidz/model.py`
-imports `sqlite3`. A boundary an import scan checks is a boundary; a boundary in a README is a
-wish.
+imports `sqlite3`. The same file holds the two other whole-repository scans: every tracked file
+must be pure ASCII, since non-ASCII source is where a bidi override or a homoglyph identifier
+hides, and no dataclass may carry a default that Python 3.11 refuses to import, which is a rule
+3.12 relaxed and therefore one only the oldest supported leg would otherwise catch. A boundary an
+import scan checks is a boundary; a boundary in a README is a wish.
 
 **Composite unique indexes on readable columns, not a hashed key.** The two constraints are
 `deliveries(delivery_id)`, where `delivery_id` is `f"{provider}:{identity}"`, and
