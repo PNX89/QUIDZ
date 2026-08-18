@@ -8,7 +8,14 @@ import pytest
 from conftest import adyen_body, authorize_body
 from quidz import inbox
 from quidz.clock import FakeClock
-from quidz.dlq import REASON_CODES, RetryPolicy, classify, next_delay, should_retry
+from quidz.dlq import (
+    REASON_CODES,
+    RetryPolicy,
+    classify,
+    jitter_source,
+    next_delay,
+    should_retry,
+)
 from quidz.events import Provider
 from quidz.inbox import DeliveryState, claim, drain, drain_until_idle
 from quidz.ledger import apply_delivery, load_payment
@@ -42,15 +49,15 @@ def test_a_transient_failure_backs_off_then_succeeds(
     take(conn, "evt_auth", authorize_body("evt_auth"), clock)
     drain_until_idle(conn, clock=clock, policy=policy)
 
+    # One generator across both retries, which is what a worker holds. Re-seeding per attempt
+    # would draw the same number twice at two different ceilings.
     # approx, because the schedule is stored as an absolute next_attempt_at and the wait is
     # the difference of two floats rather than the delay itself.
-    expected = [next_delay(policy, attempt, random.Random(0)) for attempt in (1, 2)]
+    rng = random.Random(0)
+    expected = [next_delay(policy, attempt, rng) for attempt in (1, 2)]
     effects = conn.execute("SELECT count(*) AS n FROM effects").fetchone()["n"]
-    assert (clock.slept, delivery(conn)["state"], effects) == (
-        pytest.approx(expected),
-        DeliveryState.APPLIED,
-        1,
-    )
+    assert clock.slept == pytest.approx(expected)
+    assert (delivery(conn)["state"], effects) == (DeliveryState.APPLIED, 1)
 
 
 def test_a_permanent_failure_dead_letters_on_the_first_attempt(conn: sqlite3.Connection) -> None:
@@ -82,12 +89,32 @@ def test_the_global_budget_stops_retries_below_max_attempts() -> None:
 
 
 def test_jitter_from_a_seeded_generator_reproduces_exactly() -> None:
-    policy = RetryPolicy()
-    first = [next_delay(policy, attempt, rng) for rng in [random.Random(0)] for attempt in range(6)]
+    policy = RetryPolicy(seed=0)
+    first = [
+        next_delay(policy, attempt, rng) for rng in [jitter_source(policy)] for attempt in range(6)
+    ]
     second = [
-        next_delay(policy, attempt, rng) for rng in [random.Random(0)] for attempt in range(6)
+        next_delay(policy, attempt, rng) for rng in [jitter_source(policy)] for attempt in range(6)
     ]
     assert first == second
+
+
+def test_an_unseeded_policy_does_not_hand_every_worker_the_same_schedule() -> None:
+    """The default has to be unpredictable, or full jitter buys nothing.
+
+    A seeded generator built from the policy inside the drain loop draws the identical
+    sequence on every pass and on every worker in a fleet, which is the lockstep retry the
+    jitter exists to break up. Determinism is a test facility, so it lives behind an explicit
+    seed and never behind the default.
+    """
+    policy = RetryPolicy()
+    first = [
+        next_delay(policy, attempt, rng) for rng in [jitter_source(policy)] for attempt in range(8)
+    ]
+    second = [
+        next_delay(policy, attempt, rng) for rng in [jitter_source(policy)] for attempt in range(8)
+    ]
+    assert (policy.seed, first == second) == (None, False)
 
 
 def test_the_delay_never_exceeds_the_ceiling() -> None:

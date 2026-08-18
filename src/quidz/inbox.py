@@ -21,7 +21,7 @@ from typing import Literal
 
 from quidz import metrics
 from quidz.clock import Clock
-from quidz.dlq import RetryPolicy, classify, next_delay, should_retry
+from quidz.dlq import RetryPolicy, classify, jitter_source, next_delay, should_retry
 from quidz.events import (
     CanonicalEvent,
     EventError,
@@ -237,15 +237,25 @@ def _record_budget(conn: sqlite3.Connection, now: float, used: int) -> None:
 
 
 def drain(
-    conn: sqlite3.Connection, *, clock: Clock, policy: RetryPolicy, limit: int = 100
+    conn: sqlite3.Connection,
+    *,
+    clock: Clock,
+    policy: RetryPolicy,
+    limit: int = 100,
+    rng: random.Random | None = None,
 ) -> DrainReport:
     """Apply every due delivery, one transaction each, and return what happened to them.
 
     One transaction per delivery, not one per batch: a poisoned delivery must not roll back
     the effects of the deliveries next to it.
+
+    The generator is a parameter so a worker keeps one across passes. Building it here from the
+    policy on every call restarts the sequence each pass, which turns full jitter into one
+    fixed set of delays repeated forever, and identically on every worker in a fleet.
     """
     now = clock.now()
-    rng = random.Random(policy.seed)
+    if rng is None:
+        rng = jitter_source(policy)
     budget_used = _budget_used(conn, now)
     rows = conn.execute(
         "SELECT delivery_id, provider, raw, attempts, state FROM deliveries "
@@ -345,8 +355,9 @@ def drain_until_idle(
     what reconciliation reports as PARKED_STALE.
     """
     total = DrainReport()
+    rng = jitter_source(policy)
     for _ in range(max_passes):
-        pass_report = drain(conn, clock=clock, policy=policy)
+        pass_report = drain(conn, clock=clock, policy=policy, rng=rng)
         total = total.merge(pass_report)
         pending = conn.execute(
             "SELECT next_attempt_at, parked_until FROM deliveries WHERE state IN (?, ?)",
