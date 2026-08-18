@@ -36,7 +36,6 @@ from quidz.verify import (
     STRIPE_DEFAULT_TOLERANCE_SECONDS,
     SignatureError,
     StaleTimestamp,
-    adyen_signing_fields,
     verify_adyen,
     verify_stripe,
 )
@@ -421,7 +420,7 @@ def receive_adyen(
     additional = item.get("additionalData")
     signature = additional.get("hmacSignature", "") if isinstance(additional, Mapping) else ""
     try:
-        verify_adyen(adyen_signing_fields(item), str(signature), hmac_key_hex)
+        verify_adyen(item, str(signature), hmac_key_hex)
     except SignatureError:
         metrics.bump(conn, "signature_rejected")
         raise

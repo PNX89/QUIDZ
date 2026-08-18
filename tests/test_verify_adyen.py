@@ -6,7 +6,7 @@ import hmac
 
 import pytest
 
-from quidz.verify import BadSignature, adyen_signing_string, verify_adyen
+from quidz.verify import BadSignature, adyen_signing_fields, adyen_signing_string, verify_adyen
 
 KEY_HEX = "00" * 32
 
@@ -23,6 +23,18 @@ DOCUMENTED = {
 DOCUMENTED_STRING = (
     "7914073381342284::TestMerchant:TestPayment-1407325143704:1130:EUR:AUTHORISATION:true"
 )
+# The wire shape: the amount is nested, and eventDate and paymentMethod ride along unsigned.
+NOTIFICATION_ITEM: dict[str, object] = {
+    "pspReference": "7914073381342284",
+    "originalReference": "",
+    "merchantAccountCode": "TestMerchant",
+    "merchantReference": "TestPayment-1407325143704",
+    "amount": {"value": 1130, "currency": "EUR"},
+    "eventCode": "AUTHORISATION",
+    "success": "true",
+    "eventDate": "2026-08-18T10:00:00+02:00",
+    "paymentMethod": "visa",
+}
 
 
 def signature(item: dict[str, str], key_hex: str = KEY_HEX) -> str:
@@ -77,8 +89,24 @@ def test_a_tampered_value_fails() -> None:
         verify_adyen({**DOCUMENTED, "value": "1131"}, good, KEY_HEX)
 
 
+def test_a_real_notification_item_verifies_with_its_amount_still_nested() -> None:
+    # The wire shape, not the flattened one. Signing the item directly leaves the value and
+    # currency segments empty, and every genuine delivery then fails for a reason that looks
+    # like a bad key.
+    flat = adyen_signing_fields(NOTIFICATION_ITEM)
+    assert adyen_signing_string(flat) == DOCUMENTED_STRING
+    verify_adyen(NOTIFICATION_ITEM, signature(flat), KEY_HEX)
+
+
 def test_no_timestamp_is_consulted_anywhere_in_the_adyen_path() -> None:
     # Adyen signs no timestamp, so a Stripe style tolerance window is impossible here and
-    # identity dedup plus TLS plus IP allowlisting is the whole replay defence.
-    assert "eventDate" not in adyen_signing_string(DOCUMENTED)
-    verify_adyen(DOCUMENTED, signature(DOCUMENTED), KEY_HEX)
+    # identity dedup plus TLS plus IP allowlisting is the whole replay defence. Fed an item
+    # that does carry an eventDate, because an item without one makes this vacuously true.
+    later = {**NOTIFICATION_ITEM, "eventDate": "2026-08-19T23:59:59+02:00"}
+    assert "eventDate" in NOTIFICATION_ITEM
+    assert adyen_signing_fields(later) == adyen_signing_fields(NOTIFICATION_ITEM)
+
+    # Adyen documents duplicates whose eventDate differs, so one signature has to cover both.
+    one_signature = signature(adyen_signing_fields(NOTIFICATION_ITEM))
+    verify_adyen(NOTIFICATION_ITEM, one_signature, KEY_HEX)
+    verify_adyen(later, one_signature, KEY_HEX)

@@ -143,9 +143,16 @@ def verify_stripe(
 
     # Checked at receipt time, never at processing time: a Stripe retry carries a new
     # timestamp and a new signature, so a queued delivery must not be re-checked later.
-    if abs(now - timestamp) > tolerance_seconds:
+    #
+    # Deliberately one sided. An attacker can only replay a signature the legitimate sender
+    # already minted, and minting a future timestamp needs the endpoint secret, so rejecting a
+    # future dated delivery buys no defence at all. What it does buy is that a receiving host
+    # a few minutes slow reads valid live traffic as a replay, counts it as replay_rejected and
+    # marks it non retryable. Stripe's own libraries check the past side only.
+    if now - timestamp > tolerance_seconds:
         raise StaleTimestamp(
-            f"signed timestamp {timestamp} is outside the {tolerance_seconds}s tolerance at {now}"
+            f"signed timestamp {timestamp} is older than the {tolerance_seconds}s tolerance "
+            f"at {now}"
         )
     return timestamp
 
@@ -180,11 +187,18 @@ def adyen_signing_fields(item: Mapping[str, object]) -> dict[str, str]:
 
 
 def adyen_signing_string(item: Mapping[str, str]) -> str:
+    """Join the eight signed fields. Takes the flat mapping adyen_signing_fields produces."""
     return ":".join(adyen_escape(_text(item.get(name))) for name in ADYEN_SIGNED_FIELDS)
 
 
-def verify_adyen(item: Mapping[str, str], signature_b64: str, hmac_key_hex: str) -> None:
-    """Verify additionalData.hmacSignature. No timestamp is signed, so no window is possible."""
+def verify_adyen(item: Mapping[str, object], signature_b64: str, hmac_key_hex: str) -> None:
+    """Verify additionalData.hmacSignature. No timestamp is signed, so no window is possible.
+
+    The flattening happens here rather than at the call site. A notification item carries the
+    amount nested under `amount`, so signing the item directly leaves the value and currency
+    segments empty and every real item fails verification for a reason that looks like a bad
+    key. Flattening an already flat mapping is a no-op, so both shapes verify.
+    """
     try:
         key = bytes.fromhex(hmac_key_hex)
     except ValueError as exc:
@@ -192,7 +206,8 @@ def verify_adyen(item: Mapping[str, str], signature_b64: str, hmac_key_hex: str)
             "the Adyen HMAC key is the hexadecimal value from the Customer Area, "
             "decoded to raw bytes before use"
         ) from exc
-    expected = hmac.new(key, adyen_signing_string(item).encode("utf-8"), hashlib.sha256).digest()
+    signing_string = adyen_signing_string(adyen_signing_fields(item))
+    expected = hmac.new(key, signing_string.encode("utf-8"), hashlib.sha256).digest()
     try:
         given = base64.b64decode(signature_b64, validate=True)
     except ValueError as exc:

@@ -156,7 +156,7 @@ sequenceDiagram
     A->>W: a correctly signed body captured earlier
     W->>V: verify_stripe with now set to receipt time
     V->>V: the HMAC matches an active endpoint secret
-    V->>V: abs of now minus t exceeds the 300 second tolerance
+    V->>V: now minus t exceeds the 300 second tolerance
     V-->>W: StaleTimestamp
     W->>W: bump replay_rejected
     W-->>A: 400, nothing claimed and nothing applied
@@ -200,7 +200,7 @@ sequenceDiagram
 | Encoding | hex, in `Stripe-Signature: t=...,v1=...` | base64, in `additionalData.hmacSignature` |
 | Rotation | several `v1` values in one header, the previous secret stays active up to 24 hours | one key at a time |
 | Timestamp signed | yes, so a tolerance window is possible, 300 seconds by default | no, so a tolerance window is impossible |
-| Replay defence | the window, plus identity dedup | identity dedup, TLS and IP allowlisting only |
+| Replay defence | the window on the past side only, plus identity dedup | identity dedup, TLS and IP allowlisting only |
 | Acknowledgement | any 2xx | any 2xx, legacy form HTTP 200 with the body `[accepted]` |
 
 That last row is why both are here. A tolerance window is not a webhook security primitive, it

@@ -80,6 +80,14 @@ def test_tolerance_boundary_passes_and_one_second_past_it_is_stale() -> None:
         verify_stripe(RAW, headers, [PRIMARY], now=edge + 1)
 
 
+def test_a_receiver_clock_behind_the_sender_does_not_read_live_traffic_as_a_replay() -> None:
+    # The window is one sided on purpose. Forging a future timestamp needs the endpoint secret,
+    # so a two sided check defends nothing, while a receiving host a few minutes slow rejects
+    # perfectly good deliveries as replays and marks them non retryable.
+    headers = header(RAW, NOW, PRIMARY)
+    assert verify_stripe(RAW, headers, [PRIMARY], now=NOW - 3600) == NOW
+
+
 def test_zero_tolerance_is_refused() -> None:
     with pytest.raises(ValueError, match="tolerance of 0"):
         verify_stripe(RAW, header(RAW, NOW, PRIMARY), [PRIMARY], now=NOW, tolerance_seconds=0)
