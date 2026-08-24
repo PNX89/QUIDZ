@@ -38,10 +38,14 @@ change arrives as a diff with a checklist against it, and that the pipeline has 
 before the merge rather than after it.
 
 **Merge with rebase, never with squash.** GitHub's squash button rewrites the author to the
-account's primary address and appends a `Co-authored-by` trailer. This portfolio's pre-push gate
+account's primary address and appends a co-author trailer to the message. The pre-push gate here
 rejects both: one author identity across every commit, and no attribution trailers of any kind.
-The first pull request here was squashed and failed the gate for exactly those two reasons, which
-is how the rule got written down instead of being rediscovered later.
+The first pull request in this toolset was squashed and failed the gate on exactly those two
+counts, which is how the rule came to be written down rather than rediscovered later.
+
+The trailer is described here rather than quoted, because the gate scans tracked files for it as
+well as commit messages, and a document explaining a banned string should not be the thing that
+introduces it.
 
 ## What a review looks for
 
