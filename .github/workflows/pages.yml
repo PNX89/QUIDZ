@@ -1,0 +1,59 @@
+name: Pages
+
+# Publishes site/index.html, the card at https://pnx89.github.io/QUIDZ/.
+#
+# The card is generated outside this repository and committed, so this workflow builds
+# nothing: no Node, no network beyond the upload, and no token beyond GITHUB_TOKEN. That is
+# deliberate. The card's content is the captured output of the real demo, and the job of
+# proving it still matches a live run belongs to the test suite in ci.yml, which is the only
+# place that can run the demo. A publication job that also rebuilt would be a second place
+# for the two to disagree.
+#
+# Pages was enabled out of band with the REST API rather than by actions/configure-pages,
+# whose enablement input needs a token beyond GITHUB_TOKEN. That keeps the zero secrets rule.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Read-only by default. The deploy job widens this for itself and nothing else.
+permissions:
+  contents: read
+
+# One deployment at a time, and a queued run is not worth cancelling: it would leave the live
+# site on an older commit than main with nothing saying so.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Refuse to publish a card that is empty or carries a banned dash
+        # The two dash characters are written as their UTF-8 bytes on purpose. This repository
+        # asserts that every tracked text file is pure ASCII, and a check for a character
+        # cannot be the thing that introduces it.
+        run: |
+          test -s site/index.html || { echo "site/index.html is missing or empty"; exit 1; }
+          EM=$(printf '\xe2\x80\x94'); EN=$(printf '\xe2\x80\x93')
+          if LC_ALL=C grep -q -e "$EM" -e "$EN" site/index.html; then
+            echo "site/index.html contains an em or en dash"; exit 1
+          fi
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.0
