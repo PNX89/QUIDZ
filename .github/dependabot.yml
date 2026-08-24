@@ -1,0 +1,21 @@
+# Generated. Dependency updates, weekly, capped so the queue stays reviewable.
+#
+# github-actions is the important half: every workflow here pins an exact version rather than a
+# floating major tag, which is deliberate and which goes stale silently without something
+# watching it. uv reads pyproject.toml and uv.lock directly.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Update"
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "Update"
