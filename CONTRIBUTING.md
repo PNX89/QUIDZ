@@ -47,6 +47,22 @@ The trailer is described here rather than quoted, because the gate scans tracked
 well as commit messages, and a document explaining a banned string should not be the thing that
 introduces it.
 
+## Regenerating the evidence
+
+Some numbers in the README, and everything on the card at
+https://pnx89.github.io/QUIDZ, come from a real run whose output is committed under
+`docs/evidence/`. If you change behaviour, regenerate rather than editing either by hand:
+
+```bash
+uv run python scripts/capture_evidence.py
+```
+
+The output is committed on purpose. Actions logs are kept for 90 days and then the run and
+everything it printed are gone, so a claim that lives only in a log outlives its own evidence.
+Nothing here runs on a schedule either: GitHub disables a scheduled workflow in a public
+repository after 60 days without activity, which is a month before that retention window closes,
+so a safeguard on a timer would switch itself off just before it was needed.
+
 ## What a review looks for
 
 The pull request template carries the checklist. Two items on it are unusual and are the ones
