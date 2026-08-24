@@ -12,6 +12,7 @@ every connection. https://www.sqlite.org/wal.html
 from __future__ import annotations
 
 import os
+import pathlib
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -87,6 +88,16 @@ def connect(path: str | os.PathLike[str], *, busy_timeout_ms: int = 5000) -> sql
     BEGIN IMMEDIATE: a deferred transaction that upgrades to a write lock later raises
     SQLITE_BUSY under contention, which is a flaky CI leg rather than a real defence.
     """
+    # sqlite3 reports a missing PARENT directory as "unable to open database file", which reads
+    # as a permissions or corruption problem and sends you looking in the wrong place. The CLI
+    # creates the directory itself, so this only ever bit a caller constructing the app directly,
+    # which is exactly what the README's adapter example asks a reader to do.
+    parent = pathlib.Path(path).expanduser().parent
+    if str(parent) and not parent.is_dir():
+        raise NotADirectoryError(
+            f"the directory for the database does not exist: {parent}. "
+            "Create it, or pass a path inside one that does."
+        )
     conn = sqlite3.connect(path, timeout=busy_timeout_ms / 1000, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")

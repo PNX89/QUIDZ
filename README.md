@@ -14,6 +14,23 @@ a settlement report.
 
 Framework-free core, standard library only, no network in any code path or test.
 
+**One module is allowed to import a web framework, and an AST scan over every file enforces
+that rather than this sentence.** `quidz.app` is the FastAPI adapter; the ledger, the verifier
+and the reconciler all work with FastAPI uninstalled. It takes its signing secrets as arguments
+and reads no ambient configuration, so binding it is explicit and an unsigned delivery is
+refused at the door rather than parsed first:
+
+```bash
+uv run python -c "import uvicorn, quidz.app as a; uvicorn.run(a.create_app(db_path='/tmp/quidz-adapter.db', secrets=[b'whsec_demo'], adyen_hmac_key_hex='00'*32), port=8000)"
+
+curl -sS -X POST localhost:8000/webhooks/stripe -d '{"id":"evt_1"}'
+{"error":"missing Stripe-Signature header"}
+```
+
+`quidz demo --http` drives that same adapter in process over an ASGI transport with no socket
+bound, which is what CI runs: a bound server in a test is a readiness race and a port collision
+waiting to happen, and this repository argues against exactly that class of flakiness.
+
 QUESTZ in the same toolset also ends in a fail-closed gate behind a jittered retry, and argues
 something different with it: there is no ledger behind a browser check, so repetition there is
 never intrinsically safe and the question is how to give up cleanly. Here the ledger is what
@@ -560,7 +577,7 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-141 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+142 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
 second on this machine. That count is asserted against a real collection run, because a number
 in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
 wheel ships `py.typed` and that is a promise to whoever installs it.
