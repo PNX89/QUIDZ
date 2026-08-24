@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import contextlib
+import pathlib
+
 import pytest
 
 from conftest import EventFactory
@@ -177,3 +180,26 @@ def test_rank_never_regresses_on_a_late_arriving_earlier_event(
 def test_capture_before_authorize_is_premature_not_a_failure(make_event: EventFactory) -> None:
     with pytest.raises(PrematureEvent):
         apply_effect(FRESH, make_event(EffectKind.CAPTURE, 1000))
+
+
+def test_a_missing_parent_directory_says_so_instead_of_unable_to_open_database_file(
+    tmp_path: pathlib.Path,
+) -> None:
+    """sqlite3 blames the file for a missing directory, which sends you looking in the wrong place.
+
+    Found by running the adapter example the README now shows: `create_app` on a path inside a
+    directory that does not exist failed with "unable to open database file", which reads as a
+    permissions or corruption problem. The CLI makes its own directory, so only a caller building
+    the app directly ever saw it, and that caller is the reader following the README.
+    """
+    from quidz import store
+
+    missing = tmp_path / "not-created-yet" / "quidz.db"
+    with pytest.raises(NotADirectoryError) as caught:
+        store.connect(missing)
+    assert str(missing.parent) in str(caught.value)
+
+    # And the ordinary case is untouched: an existing directory still opens.
+    missing.parent.mkdir()
+    with contextlib.closing(store.connect(missing)) as conn:
+        assert conn.execute("select 1").fetchone()[0] == 1
