@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import shlex
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -145,3 +147,25 @@ def test_the_install_command_the_cli_prints_is_the_one_the_readme_gives() -> Non
 def test_the_readme_cites_every_source_the_design_depends_on() -> None:
     urls = set(re.findall(r"https://[^\s<>()\[\],]+", README.read_text(encoding="utf-8")))
     assert sorted(REQUIRED_CITATIONS - urls) == []
+
+
+def test_the_readme_states_the_number_of_tests_this_suite_actually_has() -> None:
+    """Collected in a subprocess, so the number comes from pytest rather than from a memory.
+
+    A count typed into a README is true on the day it is typed. `--collect-only` runs nothing,
+    so this does not recurse, and `-o addopts=` neutralises this repository's own addopts so
+    the output shape is the plain one this parses rather than whatever the config makes it.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-o", "addopts=", "--collect-only", "-q"],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+        cwd=TESTS.parent,
+    )
+    match = re.search(r"^(\d+) tests? collected", result.stdout, re.MULTILINE)
+    assert match is not None, f"could not read a collection total from:\n{result.stdout[-500:]}"
+    collected = int(match.group(1))
+    assert collected > 0
+    assert f"{collected} tests" in README.read_text(encoding="utf-8")

@@ -560,8 +560,9 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-140 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
-second on this machine. `mypy` runs `--strict` over both the package and the tests, because the
+141 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+second on this machine. That count is asserted against a real collection run, because a number
+in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
 wheel ships `py.typed` and that is a promise to whoever installs it.
 `pyproject.toml` sets `filterwarnings = ["error"]` with an empty ignore list, which is what makes
 the `server` extra's lower bounds load-bearing rather than decorative: below roughly
@@ -582,9 +583,17 @@ uv python install 3.11 3.12 3.13
 
 MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Quelin Zammit.
 
-Part of the Q...Z toolset, five tools for finding the failure that does not announce itself:
-[QUACKZ](https://github.com/PNX89/QUACKZ), backtest overfitting checks;
-[QUOTEZ](https://github.com/PNX89/QUOTEZ), a read-only market data MCP server;
-[QUELLZ](https://github.com/PNX89/QUELLZ), prompt-injection containment measured against
-utility; QUIDZ, this one; and [QUESTZ](https://github.com/PNX89/QUESTZ), browser drift
-detection.
+<!-- toolset:start -->
+
+Part of the Q...Z toolset, all of it designing for the failure that does not announce itself:
+
+- [QUACKZ](https://github.com/PNX89/QUACKZ), deflating a backtest that only looks good because
+  it was picked out of two hundred.
+- [QUOTEZ](https://github.com/PNX89/QUOTEZ), market data an agent can read and cannot act on.
+- [QUELLZ](https://github.com/PNX89/QUELLZ), measuring what prompt-injection containment costs
+  in utility as well as in attack rate.
+- QUIDZ, this one: refusing the outbound payment that would have gone out twice.
+- [QUESTZ](https://github.com/PNX89/QUESTZ), stopping a scraper before it writes a CSV from a
+  page that changed shape.
+
+<!-- toolset:end -->
