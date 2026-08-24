@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import subprocess
@@ -8,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from quidz import __version__
 from quidz.cli import INSTALL_COMMAND, build_parser, main
 
 TESTS = Path(__file__).resolve().parent
@@ -169,3 +171,73 @@ def test_the_readme_states_the_number_of_tests_this_suite_actually_has() -> None
     collected = int(match.group(1))
     assert collected > 0
     assert f"{collected} tests" in README.read_text(encoding="utf-8")
+
+
+def _escaped(text: str) -> str:
+    """The card is HTML, so the captured output appears in it escaped, not raw."""
+    return (
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+    )
+
+
+def test_the_committed_demo_output_still_matches_a_live_run(tmp_path: Path) -> None:
+    """The Pages card publishes this output, so a stale copy is a lie on a public page.
+
+    Run against a fresh database in tmp_path, with the path substituted back, exactly as
+    `test_the_readme_output_block_is_what_the_demo_actually_prints` does above. The ledger is
+    idempotent by design, so a second run against the same file is a run in which nothing
+    happens, and comparing against that would prove only that the demo can do nothing twice.
+    """
+    db = tmp_path / "quidz.db"
+    live = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys;from quidz.cli import main;sys.exit(main())",
+            "demo",
+            "--scenario",
+            "adversarial",
+            "--db",
+            str(db),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=True,
+        cwd=TESTS.parent,
+    ).stdout.replace(str(db), "/tmp/quidz-demo/quidz.db")
+    committed = (TESTS.parent / "docs" / "evidence" / "demo.txt").read_text(encoding="utf-8")
+    assert committed == live, (
+        "docs/evidence/demo.txt no longer matches a live run. "
+        "Run: uv run python scripts/capture_evidence.py, then regenerate the card."
+    )
+
+
+def test_the_published_card_carries_the_output_it_claims_to() -> None:
+    card = (TESTS.parent / "site" / "index.html").read_text(encoding="utf-8")
+    demo = (TESTS.parent / "docs" / "evidence" / "demo.txt").read_text(encoding="utf-8")
+    assert _escaped(demo.rstrip()) in card, "the card's terminal block is not the captured output"
+    assert "a test fails when it" in card
+    assert "/Users/" not in card and "/var/folders/" not in card
+
+
+def test_the_card_states_numbers_that_are_true_today() -> None:
+    facts = json.loads(
+        (TESTS.parent / "docs" / "evidence" / "facts.json").read_text(encoding="utf-8")
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "-o", "addopts=", "--collect-only", "-q"],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=True,
+        cwd=TESTS.parent,
+    )
+    match = re.search(r"^(\d+) tests? collected", result.stdout, re.MULTILINE)
+    assert match is not None, f"no collection total in:\n{result.stdout[-400:]}"
+    assert facts["tests"] == int(match.group(1)), "facts.json's test total is stale"
+    # Against the package version, never `git describe`: actions/checkout clones without tags.
+    assert facts["release"] == f"v{__version__}"
+    card = (TESTS.parent / "site" / "index.html").read_text(encoding="utf-8")
+    assert f"<dd>{facts['tests']}</dd>" in card
+    assert f"<dd>{facts['release']}</dd>" in card

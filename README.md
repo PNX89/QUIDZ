@@ -577,7 +577,7 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-142 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+145 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
 second on this machine. That count is asserted against a real collection run, because a number
 in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
 wheel ships `py.typed` and that is a promise to whoever installs it.

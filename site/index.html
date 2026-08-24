@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QUIDZ</title>
+<meta name="description" content="refusing the outbound payment that would have gone out twice">
+<style>
+  /* Light is defined on bare :root so a viewer with no preference gets a complete palette,
+     and only the tokens that differ are redefined for dark. */
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #55554e; --rule: #dedcd4;
+    --term-bg: #f4f3ee; --term-fg: #23231f; --accent: #7a4b12;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --fg: #e9e8e3; --muted: #a2a19a; --rule: #2e2e34;
+      --term-bg: #101014; --term-fg: #dcdbd4; --accent: #d9a441;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 3rem 1.25rem 5rem;
+    background: var(--bg); color: var(--fg);
+    font: 16px/1.65 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  h1 { font-size: 2.25rem; letter-spacing: -0.02em; margin: 0 0 .35rem; }
+  .blurb { color: var(--muted); margin: 0 0 2rem; font-size: 1.05rem; }
+  .claim { font-size: 1.2rem; line-height: 1.5; margin: 0 0 2rem; border-left: 3px solid var(--accent); padding-left: 1rem; }
+  .facts { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 1rem 0; margin: 0 0 2rem;
+           border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  .facts div { font-size: .9rem; }
+  .facts dt { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; }
+  .facts dd { margin: .15rem 0 0; font-variant-numeric: tabular-nums; }
+  h2 { font-size: .78rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted);
+       margin: 2.5rem 0 .5rem; font-weight: 600; }
+  .cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem;
+         color: var(--muted); margin: 0 0 .5rem; }
+  /* Wide output scrolls inside its own box. The page body never scrolls sideways. */
+  pre { background: var(--term-bg); color: var(--term-fg); padding: 1.25rem; border-radius: 6px;
+        overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: .8rem; line-height: 1.5; margin: 0; }
+  .note { color: var(--muted); font-size: .82rem; margin: .6rem 0 0; }
+  ul { list-style: none; padding: 0; margin: .5rem 0 0; }
+  li { padding: .35rem 0; border-bottom: 1px solid var(--rule); }
+  li span { color: var(--muted); font-size: .88rem; }
+  a { color: inherit; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--accent); }
+  footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--rule);
+           color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>QUIDZ</h1>
+  <p class="blurb">refusing the outbound payment that would have gone out twice.</p>
+
+  <p class="claim">A delivery that arrives twice, out of order, or never must not move money twice. This is the ledger that makes sure of it, and the reconciliation that proves it afterwards.</p>
+
+  <dl class="facts">
+    <div><dt>Tests</dt><dd>145</dd></div>
+    <div><dt>Python</dt><dd>3.11 to 3.14</dd></div>
+    <div><dt>Release</dt><dd>v0.1.0</dd></div>
+    <div><dt>Licence</dt><dd>MIT</dd></div>
+  </dl>
+
+  <h2>The demo, as it really ran</h2>
+  <p class="cmd">$ uv run quidz demo --scenario adversarial --db /tmp/quidz-demo/quidz.db</p>
+  <pre>QUIDZ demo
+  scenario      adversarial
+  seed          0
+  breaks        amount-mismatch, drop, duplicate, reorder, replay, tamper, unmodelled
+  transport     in-process, no socket
+  database      /tmp/quidz-demo/quidz.db
+  delivery log  /tmp/quidz-demo/quidz.db.jsonl
+
+RECEIPT
+  deliveries    17
+  accepted      14   duplicate 0   in_progress 1
+  rejected      2   (signature 1, replay 1)
+
+DRAIN
+  applied 11   noop_duplicate 1   parked 2   dead_lettered 1   retried 2
+
+LEDGER
+  PAYMENT                     AUTHORIZED        CAPTURED        REFUNDED  STATUS
+  order-YBMEWG9S               45.50 EUR        0.00 EUR        0.00 EUR  capture_failed
+  order:MB9WJKNY              196.00 GBP      196.00 GBP      196.00 GBP  refunded
+  pi_C29cZ86wXAsjLR2X          33.50 USD       22.11 USD        7.29 USD  partially_refunded
+  pi_PCSkRc69KhZqGkJV         128.50 EUR      128.50 EUR        0.00 EUR  captured
+  pi_W7bXVRVMG8MCWwSh           5300 JPY           0 JPY           0 JPY  authorized
+
+EXCEPTION REPORT
+  generated_at  1787012407
+  findings      12  (CRITICAL=1 BREAK=6 WARN=2 INFO=3)
+  outbound      BLOCKED
+  ingest        open
+  blocked_ids   order-CXSHRQTY, order:MB9WJKNY, pi_C29cZ86wXAsjLR2X, pi_W7bXVRVMG8MCWwSh
+  rationale     1 critical and 6 break findings, exposure 31022 minor units; outbound blocked for 4 id(s) under scope=payment
+
+  SEVERITY KIND                      PAYMENT                DELTA  DETAIL
+  CRITICAL missing_locally           order-CXSHRQTY         12100  order-CXSHRQTY is at the provider and not in the ledger, 346806s old
+  BREAK    amount_mismatch           pi_C29cZ86wXAsjLR2X     -1000  pi_C29cZ86wXAsjLR2X net position differs by -1000 USD minor units
+  BREAK    amount_mismatch           pi_W7bXVRVMG8MCWwSh     -5300  pi_W7bXVRVMG8MCWwSh net position differs by -5300 JPY minor units
+  BREAK    fee_gross_net             pi_W7bXVRVMG8MCWwSh      5122  settlement net 5122 against capture gross 0 on pi_W7bXVRVMG8MCWwSh is 10000 bps, tolerance 500 bps
+  BREAK    parked_stale              order-CXSHRQTY             -  a delivery for order-CXSHRQTY has been parked 1206s waiting for its prerequisite, limit 900s
+  BREAK    status_mismatch           pi_W7bXVRVMG8MCWwSh         -  pi_W7bXVRVMG8MCWwSh is authorized in the ledger and captured at the provider [remote_ahead]
+  BREAK    unsettled_past_sla        order:MB9WJKNY         19600  order:MB9WJKNY captured 19600 GBP, 346806s old and absent from the settlement report
+  WARN     unknown_remote_row        EYQCVTMRYEBHXNR9           -  settlement row EYQCVTMRYEBHXNR9 joins to no ledger payment
+  WARN     unknown_remote_row        PAYOUT_BATCH_0001          -  settlement row PAYOUT_BATCH_0001 joins to no ledger payment
+  INFO     fee_gross_net             pi_C29cZ86wXAsjLR2X       -89  settlement net 2122 against capture gross 2211 on pi_C29cZ86wXAsjLR2X is 403 bps, tolerance 500 bps
+  INFO     fee_gross_net             pi_PCSkRc69KhZqGkJV      -397  settlement net 12453 against capture gross 12850 on pi_PCSkRc69KhZqGkJV is 309 bps, tolerance 500 bps
+  INFO     in_flight                 order-YBMEWG9S             -  order-YBMEWG9S diverges but is 2934s old, inside the 3600s grace window
+
+COUNTERS
+  events_received                         17
+  signature_rejected                       1
+  replay_rejected                          1
+  deduped                                  1
+  applied                                 11
+  parked                                   2
+  dead_lettered                            1
+  drift_info                               3
+  drift_warn                               2
+  drift_break                              6
+  drift_critical                           1
+  oldest_unresolved_drift_seconds     346806</pre>
+  <p class="note">Output captured on 2026-08-24. It is committed to the repository and a test fails when it
+    stops matching a live run, so this page cannot quietly drift from the code it describes.</p>
+
+  <h2>Read it</h2>
+  <ul>
+    <li><a href="https://github.com/PNX89/QUIDZ">Source on GitHub</a> <span>the README carries the argument in full</span></li>
+    <li><a href="https://github.com/PNX89/QUIDZ/releases/tag/v0.1.0">Release v0.1.0</a> <span>changelog and tag</span></li>
+  </ul>
+
+  <h2>The rest of the toolset</h2>
+  <ul>
+      <li><a href="https://pnx89.github.io/QUACKZ/">QUACKZ</a> <span>deflating a backtest that only looks good because it was picked out of two hundred</span></li>
+      <li><a href="https://pnx89.github.io/QUOTEZ/">QUOTEZ</a> <span>market data an agent can read and cannot act on</span></li>
+      <li><a href="https://pnx89.github.io/QUELLZ/">QUELLZ</a> <span>measuring what prompt-injection containment costs in utility as well as in attack rate</span></li>
+      <li><a href="https://pnx89.github.io/QUESTZ/">QUESTZ</a> <span>stopping a scraper before it writes a CSV from a page that changed shape</span></li>
+  </ul>
+
+  <footer>Quelin Zammit. Built for the failure that does not announce itself.</footer>
+</main>
+</body>
+</html>
