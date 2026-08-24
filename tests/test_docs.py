@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 import shlex
@@ -241,3 +242,36 @@ def test_the_card_states_numbers_that_are_true_today() -> None:
     card = (TESTS.parent / "site" / "index.html").read_text(encoding="utf-8")
     assert f"<dd>{facts['tests']}</dd>" in card
     assert f"<dd>{facts['release']}</dd>" in card
+
+
+def test_the_readme_frame_is_built_from_the_captured_output() -> None:
+    """The animated frame in the first screenful has to be the real run, not a picture of one.
+
+    Every text line the SVG draws, minus the prompt line it adds and the truncation note it
+    ends with, must appear in the captured output in the same order. Written this way rather
+    than by re-deriving the generator's truncation arithmetic, because a test that reimplements
+    the thing it checks passes for the wrong reason.
+    """
+    svg = (TESTS.parent / "docs" / "demo.svg").read_text(encoding="utf-8")
+    demo = (TESTS.parent / "docs" / "evidence" / "demo.txt").read_text(encoding="utf-8")
+
+    drawn = [html.unescape(m) for m in re.findall(r"<text[^>]*>(.*?)</text>", svg, re.DOTALL)]
+    assert drawn, "the frame draws no text at all"
+    assert drawn[0].startswith("$ "), "the frame does not open on the command it ran"
+    assert drawn[-1].startswith("... ") and "more lines" in drawn[-1]
+
+    body = [line for line in drawn[1:-2] if line.strip()]
+    haystack = demo.splitlines()
+    position = 0
+    for line in body:
+        stem = line[:-3] if line.endswith("...") else line
+        while position < len(haystack) and not haystack[position].startswith(stem):
+            position += 1
+        assert position < len(haystack), f"the frame draws a line the run never printed: {line!r}"
+        position += 1
+
+    # ASCII only: test_every_text_file_in_the_repository_is_pure_ascii covers the tree, and this
+    # says why it matters here. The frame is generated, so a non ASCII glyph would arrive
+    # silently from a code change rather than from anyone typing one.
+    assert svg.isascii()
+    assert "<script" not in svg, "a README image is served through a proxy that strips script"

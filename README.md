@@ -3,6 +3,16 @@
 **A delivery that arrives twice, out of order, or never must not move money twice. This is the
 ledger that makes sure of it, and the reconciliation that proves it afterwards.**
 
+![A real run of the demo: a delivery stream carrying seven deliberate breaks applied to an
+idempotent ledger, then reconciled against a settlement report](docs/demo.svg)
+
+Seven deliberate breaks in one delivery stream: an amount mismatch, a drop, a duplicate, a
+reorder, a replay, a tampered signature and an event shape the parser has never seen. The
+frame is built from `docs/evidence/demo.txt`, the captured output of a real run, asserted
+against a live one by the test suite; the playback cadence is chosen, none of the text is. The
+whole run, including the reconciliation, is at
+[pnx89.github.io/QUIDZ](https://pnx89.github.io/QUIDZ/).
+
 [![CI](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml/badge.svg)](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20to%203.14-blue)](https://github.com/PNX89/QUIDZ)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -577,7 +587,7 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-145 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+146 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
 second on this machine. That count is asserted against a real collection run, because a number
 in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
 wheel ships `py.typed` and that is a promise to whoever installs it.
