@@ -8,9 +8,9 @@ idempotent ledger, then reconciled against a settlement report](docs/demo.svg)
 
 Seven deliberate breaks in one delivery stream: an amount mismatch, a drop, a duplicate, a
 reorder, a replay, a tampered signature and an event shape the parser has never seen. The
-frame is built from `docs/evidence/demo.txt`, the captured output of a real run, asserted
-against a live one by the test suite; the playback cadence is chosen, none of the text is. The
-whole run, including the reconciliation, is at
+frame paces that output; it did not write it. A test rebuilds the ledger from empty, replays
+the same stream and diffs what comes back, which is the only way a page like this stays true
+after the code moves. Reconciliation and all, at
 [pnx89.github.io/QUIDZ](https://pnx89.github.io/QUIDZ/).
 
 [![CI](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml/badge.svg)](https://github.com/PNX89/QUIDZ/actions/workflows/ci.yml)
