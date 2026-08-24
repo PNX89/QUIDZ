@@ -3,6 +3,9 @@
 **A delivery that arrives twice, out of order, or never must not move money twice. This is the
 ledger that makes sure of it, and the reconciliation that proves it afterwards.**
 
+Reading only one thing? Start at [`src/quidz/reconcile.py`](src/quidz/reconcile.py), where the
+three way comparison between the stream, the ledger and the settlement report happens.
+
 ![A real run of the demo: a delivery stream carrying seven deliberate breaks applied to an
 idempotent ledger, then reconciled against a settlement report](docs/demo.svg)
 
