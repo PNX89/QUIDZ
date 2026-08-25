@@ -627,5 +627,7 @@ Part of the Q...Z toolset, all of it designing for the failure that does not ann
   page that changed shape.
 - [QUIZZ](https://github.com/PNX89/QUIZZ), answering what a statistic said at the time, and
   refusing when it cannot.
+- [QUARANTINEZ](https://github.com/PNX89/QUARANTINEZ), treating an outcome the venue never
+  confirmed as terminal rather than as a retry.
 
 <!-- toolset:end -->
