@@ -14,46 +14,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      # Every leg is required, so a failure on one version must not cancel the others.
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
-    env:
-      UV_PYTHON: ${{ matrix.python-version }}
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          enable-cache: true
-
-      # uv's python-build-standalone channel is the interpreter source here because it has
-      # confirmed 3.14 builds.
-      - name: Install Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
-
-      - name: Sync dependencies
-        run: uv sync --all-extras --dev
-
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Format
-        run: uv run ruff format --check .
-
-      # The wheel ships py.typed, so the annotations are a promise to every consumer. This runs
-      # on every leg rather than once, because what type checks on 3.14 is not what type checks
-      # on 3.11: the 3.11 leg is where a version-specific typing mistake shows up.
-      - name: Types
-        run: uv run mypy
-
-      - name: Test
-        run: uv run pytest -q
+  # Lint, format, types and the suite across every supported interpreter, from the shared
+  # workflow in PNX89/.github, pinned to a tag rather than a moving branch.
+  #
+  # mypy runs on EVERY leg rather than once, and that is deliberate: the wheel ships py.typed, so
+  # the annotations are a promise to every consumer, and what type checks on 3.14 is not what type
+  # checks on 3.11. The 3.11 leg is where a version specific typing mistake shows up.
+  #
+  # What the pipeline is for, and the five things it deliberately does not gate, is at
+  # https://github.com/PNX89/.github/blob/main/docs/adr/0001-what-ci-is-for.md
+  checks:
+    name: checks
+    uses: PNX89/.github/.github/workflows/checks.yml@v1
+    with:
+      python-versions: '["3.11", "3.12", "3.13", "3.14"]'
+      sync-args: "--all-extras --dev"
+      run-mypy: true
 
   package:
     name: wheel carries py.typed
