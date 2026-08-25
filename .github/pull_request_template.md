@@ -7,6 +7,7 @@
 ## Checklist
 
 - [ ] Every gate passes locally, not just the tests:
+      `uv sync --all-extras --dev`
       `uv run ruff check .`
       `uv run ruff format --check .`
       `uv run mypy`
