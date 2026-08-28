@@ -1,8 +1,14 @@
 # Generated. Dependency updates, weekly, capped so the queue stays reviewable.
 #
-# github-actions is the important half: every workflow here pins an exact version rather than a
-# floating major tag, which is deliberate and which goes stale silently without something
-# watching it. uv reads pyproject.toml and uv.lock directly.
+# github-actions is the important half, and this file used to claim that every workflow pinned an
+# exact version. It was not true anywhere: the workflows were on floating major tags, nothing was
+# pinned by commit, and some steps ran `go run ...@latest`, which is not a version at all.
+#
+# A tag is a pointer its owner can move, so what this watches is a commit where a repository has
+# pinned one, and a tag where it has not. The comment beside each `uses:` line is the version a
+# reader wants; the pin is the thing that cannot change under you.
+#
+# uv reads pyproject.toml and uv.lock directly.
 version: 2
 updates:
   - package-ecosystem: "github-actions"
