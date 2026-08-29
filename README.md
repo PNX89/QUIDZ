@@ -637,5 +637,7 @@ Part of the Q...Z toolset, all of it designing for the failure that does not ann
   failure that no single field finds.
 - [QUARRYZ](https://github.com/PNX89/QUARRYZ), keeping every version a statistical office
   published, and failing the build when it quietly issues another.
+- [QUASHZ](https://github.com/PNX89/QUASHZ), refusing a row whose outcome had not been decided
+  yet when the decision would have been made.
 
 <!-- toolset:end -->
