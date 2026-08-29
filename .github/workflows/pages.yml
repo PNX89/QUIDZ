@@ -41,7 +41,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Refuse to publish a card that is empty or carries a banned dash
         # The two dash characters are written as their UTF-8 bytes on purpose. This repository
         # asserts that every tracked text file is pure ASCII, and a check for a character
@@ -52,8 +52,8 @@ jobs:
           if LC_ALL=C grep -q -e "$EM" -e "$EN" site/index.html; then
             echo "site/index.html contains an em or en dash"; exit 1
           fi
-      - uses: actions/upload-pages-artifact@v5.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
       - id: deployment
-        uses: actions/deploy-pages@v5.0.0
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
