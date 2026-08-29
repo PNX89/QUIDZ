@@ -635,5 +635,7 @@ Part of the Q...Z toolset, all of it designing for the failure that does not ann
   account, and saying what that cannot show.
 - [QUAYZ](https://github.com/PNX89/QUAYZ), telling a crash loop from an OOMKill, and naming the
   failure that no single field finds.
+- [QUARRYZ](https://github.com/PNX89/QUARRYZ), keeping every version a statistical office
+  published, and failing the build when it quietly issues another.
 
 <!-- toolset:end -->
