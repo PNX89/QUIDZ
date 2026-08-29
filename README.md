@@ -641,5 +641,7 @@ Part of the Q...Z toolset, all of it designing for the failure that does not ann
   yet when the decision would have been made.
 - [QUALMZ](https://github.com/PNX89/QUALMZ), a fixed number of looks at the holdout, where
   re-running the same configuration does not buy another.
+- [QUEUEZ](https://github.com/PNX89/QUEUEZ), ordering a feed by its sequence, because on a real
+  recorded session the clock goes backwards.
 
 <!-- toolset:end -->
