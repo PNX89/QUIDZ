@@ -45,6 +45,24 @@
     font: 16px/1.65 ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   }
   main { max-width: 46rem; margin: 0 auto; }
+  /* THE EVIDENCE BREAKS OUT WIDER THAN THE ARGUMENT, and that asymmetry is deliberate.
+     Prose wants a short measure, about 46rem, because a long line is hard to track back to the
+     start of the next one. Captured output wants whatever width it really is.
+
+     MEASURED BEFORE CHANGING ANYTHING. Nine of the sixteen transcripts are wider than the
+     roughly 90 columns that fit here, and they are wide for two different reasons. QUARRYZ's
+     longest line is an ordinary English sentence that was simply never wrapped, and that is a
+     capture-side problem. QUIDZ at 169 columns is a real log record and QUOTEZ at 142 is one
+     JSON bar per line, and NEITHER may be narrowed: truncating removes evidence and wrapping
+     stops a record being a record, while the property this whole page rests on is that the
+     committed artefact and the rendered page are the same bytes.
+
+     So the page gives the data the room instead. The block still scrolls when it must, and it
+     is keyboard reachable with a visible focus ring, so needing to scroll is not a dead end. */
+  pre, .scroller {
+    width: min(64rem, calc(100vw - 3rem));
+    margin-left: calc(50% - min(32rem, calc(50vw - 1.5rem)));
+  }
   h1 { font-size: 2.25rem; letter-spacing: -0.02em; margin: 0 0 .35rem; }
   .blurb { color: var(--muted); margin: 0 0 2rem; font-size: 1.05rem; }
   .claim { font-size: 1.2rem; line-height: 1.5; margin: 0 0 2rem; border-left: 3px solid var(--accent); padding-left: 1rem; }
