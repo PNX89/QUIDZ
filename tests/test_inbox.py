@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+
+import pytest
 
 from conftest import authorize_body, capture_body
 from quidz.clock import FakeClock
 from quidz.dlq import RetryPolicy
 from quidz.events import Provider
-from quidz.inbox import ClaimResult, DeliveryState, claim, drain, drain_until_idle, parked_events
+from quidz.inbox import (
+    ClaimResult,
+    DeliveryState,
+    claim,
+    drain,
+    drain_until_idle,
+    parked_events,
+    receive_adyen,
+)
 from quidz.reconcile import DriftKind, GatePolicy, reconcile
 
 
@@ -122,3 +133,75 @@ def test_drain_respects_its_limit(conn: sqlite3.Connection) -> None:
         take(conn, f"evt_{index}", authorize_body(f"evt_{index}", f"pi_{index}"), clock)
         clock.advance(0.05)
     assert drain(conn, clock=clock, policy=RetryPolicy(), limit=2).total == 2
+
+
+def state_of_metric(conn: sqlite3.Connection, name: str) -> int:
+    """One counter, read through the module's own snapshot rather than by touching its table.
+
+    Reading the table directly would make this test agree with a schema rather than with the
+    interface an operator uses, and would break the day the table is renamed for a reason that
+    has nothing to do with what is being asserted here.
+    """
+    from quidz import metrics
+
+    return metrics.snapshot(conn).get(name, 0)
+
+
+def test_a_forged_adyen_delivery_is_refused_at_the_front_door(
+    conn: sqlite3.Connection,
+) -> None:
+    """Deleting the signature check left 148 of 148 green, and this is the money path.
+
+    THE GAP WAS AT THE DOOR, NOT AT THE LOCK. `tests/test_verify_adyen.py` exercises
+    `verify_adyen` thoroughly, against the documented signing string and a wrong key. What
+    nothing did was drive `receive_adyen`, the function an HTTP route actually calls, with a body
+    whose signature is wrong. Replacing that one call with `pass` was invisible to the whole
+    suite, and a forged delivery was then accepted, claimed and queued for settlement.
+
+    A well tested verifier that nobody proves is CALLED is the same defect as a lock nobody
+    proves is fitted, and it is the shape this portfolio keeps finding: the guard is right, and
+    the thing that was never checked is whether anything reaches it.
+
+    Driven with a body the simulator genuinely signed, so the passing half is real rather than
+    constructed to agree with the failing half.
+    """
+    from quidz.sim import Simulator
+    from quidz.verify import BadSignature
+
+    sim = Simulator()
+    delivery = next(d for d in sim.deliveries("happy") if d.provider is Provider.ADYEN)
+    item = json.loads(delivery.raw)
+
+    # The honest body first, so a guard that refuses everything cannot pass this test.
+    accepted = receive_adyen(
+        conn,
+        delivery.raw,
+        hmac_key_hex=sim.adyen_hmac_key_hex,
+        clock=FakeClock(),
+    )
+    assert accepted is not None
+
+    # Now the same body with one signed field changed and the signature left alone, which is
+    # exactly what an attacker replaying a captured notification would send.
+    tampered = json.loads(delivery.raw)
+    amount = tampered.get("amount")
+    assert isinstance(amount, dict), "this delivery has no amount to tamper with"
+    amount["value"] = int(amount["value"]) + 1
+    forged = json.dumps(tampered, sort_keys=True, separators=(",", ":")).encode()
+
+    before = state_of_metric(conn, "signature_rejected")
+    with pytest.raises(BadSignature):
+        receive_adyen(conn, forged, hmac_key_hex=sim.adyen_hmac_key_hex, clock=FakeClock())
+    assert state_of_metric(conn, "signature_rejected") == before + 1, (
+        "the delivery was refused without the refusal being counted, so an operator watching "
+        "the metric would see nothing"
+    )
+
+    stored = conn.execute(
+        "select count(*) from deliveries where provider = ?", (Provider.ADYEN.value,)
+    ).fetchone()[0]
+    assert stored == 1, (
+        f"{stored} deliveries are stored where only the honest one should be. A forged body "
+        f"reached the ledger"
+    )
+    assert item["pspReference"]  # the honest delivery really did carry an identity
