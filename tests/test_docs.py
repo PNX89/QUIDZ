@@ -217,7 +217,22 @@ def test_the_committed_demo_output_still_matches_a_live_run(tmp_path: Path) -> N
 def test_the_published_card_carries_the_output_it_claims_to() -> None:
     card = (TESTS.parent / "site" / "index.html").read_text(encoding="utf-8")
     demo = (TESTS.parent / "docs" / "evidence" / "demo.txt").read_text(encoding="utf-8")
-    assert _escaped(demo.rstrip()) in card, "the card's terminal block is not the captured output"
+    # EVERY LINE, IN ORDER, RATHER THAN ONE CONTIGUOUS BLOCK. The card folds output longer than
+    # forty lines into a <details>, so the transcript arrives in two <pre> elements and a
+    # substring test on the whole thing fails on a page that is completely correct. Folding
+    # rather than truncating is the point: the page still carries every byte of the artefact,
+    # which is what the note under it claims, and a reader gets the argument on the first screen
+    # instead of scrolling past a hundred lines of PASS to reach the two FAILs.
+    #
+    # Asserted in ORDER, so a card that carried the right lines shuffled would still fail.
+    position = 0
+    for line in demo.rstrip().split("\n"):
+        found = card.find(_escaped(line), position)
+        assert found >= 0, (
+            f"the card is missing a line of the captured output, or has it out of order: "
+            f"{line[:70]!r}"
+        )
+        position = found
     assert "a test fails when it" in card
     assert "/Users/" not in card and "/var/folders/" not in card
 

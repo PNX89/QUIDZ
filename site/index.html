@@ -3,19 +3,38 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QUIDZ</title>
+<title>QUIDZ, by Quelin Zammit</title>
 <meta name="description" content="refusing the outbound payment that would have gone out twice">
+<link rel="canonical" href="https://pnx89.github.io/QUIDZ/">
+<!-- A NAME THAT SURVIVES THE PASTE. The title was the bare repository name, so a reviewer with
+     six of these open saw QUACKZ, QUELLZ, QUIDZ and had no way to tell them apart, and a
+     bookmark carried a word with no person attached to it. These names are deliberately
+     opaque, which is fine on the page and useless in a tab bar.
+
+     The unfurl tags matter for one specific reason rather than for social reach: an application
+     form's GitHub field is often pasted into a chat or a tracker, and a bare URL there says
+     nothing. og:title and og:description make it say what the repository argues. -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Quelin Zammit">
+<meta property="og:url" content="https://pnx89.github.io/QUIDZ/">
+<meta property="og:title" content="QUIDZ: refusing the outbound payment that would have gone out twice">
+<meta property="og:description" content="A delivery that arrives twice, out of order, or never must not move money twice.">
+<meta name="twitter:card" content="summary">
+<!-- Inline, so the tab icon costs no request and cannot 404 the way a missing favicon.ico does. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%237a4b12'/%3E%3Ctext x='16' y='23' font-family='ui-monospace,monospace' font-size='19' font-weight='700' fill='%23fbfbfa' text-anchor='middle'%3EQ%3C/text%3E%3C/svg%3E">
+<meta name="theme-color" content="#fbfbfa" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#16161a" media="(prefers-color-scheme: dark)">
 <style>
   /* Light is defined on bare :root so a viewer with no preference gets a complete palette,
      and only the tokens that differ are redefined for dark. */
   :root {
     color-scheme: light dark;
-    --bg: #fbfbfa; --fg: #1a1a18; --muted: #55554e; --rule: #dedcd4;
+    --bg: #fbfbfa; --fg: #1a1a18; --muted: #55554e; --rule: #c9c6bb;
     --term-bg: #f4f3ee; --term-fg: #23231f; --accent: #7a4b12;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #16161a; --fg: #e9e8e3; --muted: #a2a19a; --rule: #2e2e34;
+      --bg: #16161a; --fg: #e9e8e3; --muted: #a2a19a; --rule: #43434c;
       --term-bg: #101014; --term-fg: #dcdbd4; --accent: #d9a441;
     }
   }
@@ -39,6 +58,15 @@
   .cmd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem;
          color: var(--muted); margin: 0 0 .5rem; }
   /* Wide output scrolls inside its own box. The page body never scrolls sideways. */
+  /* KEYBOARD REACHABLE, because this block scrolls sideways on the cards whose output is wide
+     and a scroll container that only a mouse can reach is evidence the reader cannot get to.
+     The focus ring is drawn explicitly: the default one is invisible against the terminal
+     panel on both palettes. */
+  pre:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  details { margin: -.5rem 0 1rem; }
+  details > summary { cursor: pointer; color: var(--muted); font-size: .9rem; padding: .4rem 0; }
+  details > summary:hover { color: var(--accent); }
+  details > pre { margin-top: .5rem; }
   pre { background: var(--term-bg); color: var(--term-fg); padding: 1.25rem; border-radius: 6px;
         overflow-x: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: .8rem; line-height: 1.5; margin: 0; }
@@ -60,15 +88,18 @@
   <p class="claim">A delivery that arrives twice, out of order, or never must not move money twice. This is the ledger that makes sure of it, and the reconciliation that proves it afterwards.</p>
 
   <dl class="facts">
-    <div><dt>Tests</dt><dd>149</dd></div>
+    <div><dt>Tests</dt><dd>150</dd></div>
     <div><dt>Python</dt><dd>3.11 to 3.14</dd></div>
     <div><dt>Release</dt><dd>v0.1.0</dd></div>
-    <div><dt>Licence</dt><dd>MIT</dd></div>
   </dl>
+  <!-- THE LICENCE CELL IS GONE FROM HERE and lives in the footer instead. It was the literal
+       string MIT in this template: a quarter of the most prominent strip on a page whose note
+       three paragraphs down says nothing on it is typed by hand. It was true of all sixteen,
+       and a constant checked against nothing is a claim waiting to go stale. -->
 
   <h2>The demo, as it really ran</h2>
   <p class="cmd">$ uv run quidz demo --scenario adversarial --db /tmp/quidz-demo/quidz.db</p>
-  <pre>QUIDZ demo
+  <pre tabindex="0" role="region" aria-label="Captured output of uv run quidz demo --scenario adversarial --db /tmp/quidz-demo/quidz.db">QUIDZ demo
   scenario      adversarial
   seed          0
   breaks        amount-mismatch, drop, duplicate, reorder, replay, tamper, unmodelled
@@ -107,8 +138,10 @@ EXCEPTION REPORT
   BREAK    fee_gross_net             pi_W7bXVRVMG8MCWwSh      5122  settlement net 5122 against capture gross 0 on pi_W7bXVRVMG8MCWwSh is 10000 bps, tolerance 500 bps
   BREAK    parked_stale              order-CXSHRQTY             -  a delivery for order-CXSHRQTY has been parked 1206s waiting for its prerequisite, limit 900s
   BREAK    status_mismatch           pi_W7bXVRVMG8MCWwSh         -  pi_W7bXVRVMG8MCWwSh is authorized in the ledger and captured at the provider [remote_ahead]
-  BREAK    unsettled_past_sla        order:MB9WJKNY         19600  order:MB9WJKNY captured 19600 GBP, 346806s old and absent from the settlement report
-  WARN     unknown_remote_row        EYQCVTMRYEBHXNR9           -  settlement row EYQCVTMRYEBHXNR9 joins to no ledger payment
+  BREAK    unsettled_past_sla        order:MB9WJKNY         19600  order:MB9WJKNY captured 19600 GBP, 346806s old and absent from the settlement report</pre>
+  <details>
+    <summary>The remaining 19 lines of the same run</summary>
+    <pre tabindex="0" role="region" aria-label="Captured output of uv run quidz demo --scenario adversarial --db /tmp/quidz-demo/quidz.db, continued">  WARN     unknown_remote_row        EYQCVTMRYEBHXNR9           -  settlement row EYQCVTMRYEBHXNR9 joins to no ledger payment
   WARN     unknown_remote_row        PAYOUT_BATCH_0001          -  settlement row PAYOUT_BATCH_0001 joins to no ledger payment
   INFO     fee_gross_net             pi_C29cZ86wXAsjLR2X       -89  settlement net 2122 against capture gross 2211 on pi_C29cZ86wXAsjLR2X is 403 bps, tolerance 500 bps
   INFO     fee_gross_net             pi_PCSkRc69KhZqGkJV      -397  settlement net 12453 against capture gross 12850 on pi_PCSkRc69KhZqGkJV is 309 bps, tolerance 500 bps
@@ -127,12 +160,19 @@ COUNTERS
   drift_break                              6
   drift_critical                           1
   oldest_unresolved_drift_seconds     346806</pre>
-  <p class="note">Output captured on 2026-08-25. It is committed to the repository and a test fails when it
+  </details>
+  <p class="note">Output captured on 2026-08-30. It is committed to the repository and a test fails when it
     stops matching a live run, so this page cannot quietly drift from the code it describes.</p>
 
   <h2>Read it</h2>
   <ul>
     <li><a href="https://github.com/PNX89/QUIDZ">Source on GitHub</a> <span>the README carries the argument in full</span></li>
+    <!-- THE ROUTE BACK, WHICH NO CARD HAD. Every card carried fifteen sibling links and two
+         GitHub links and no way to reach the page that explains what the sixteen are for. That
+         matters because of how the link is actually used: an application form's GitHub field
+         takes one URL, the strongest one to give is the card matching the role, and a reviewer
+         landing there could see one repository and no argument. -->
+    <li><a href="https://pnx89.github.io/">The whole toolset</a> <span>what these sixteen repositories argue together, and why there are sixteen</span></li>
     <li><a href="https://github.com/PNX89/QUIDZ/releases/tag/v0.1.0">Release v0.1.0</a> <span>changelog and tag</span></li>
   </ul>
 
@@ -155,7 +195,8 @@ COUNTERS
       <li><a href="https://pnx89.github.io/QUIETZ/">QUIETZ</a> <span>watching whether the data arrived rather than whether the server answered</span></li>
   </ul>
 
-  <footer>Quelin Zammit. Built for the failure that does not announce itself.</footer>
+  <footer>Quelin Zammit. Built for the failure that does not announce itself.
+    <a href="https://github.com/PNX89/QUIDZ/blob/main/LICENSE">MIT</a>.</footer>
 </main>
 </body>
 </html>
