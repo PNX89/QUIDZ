@@ -1,4 +1,9 @@
-"""The doc-drift contract, generated. The contract itself is in DOCDRIFT.md.
+"""The doc-drift contract, generated.
+
+THE CONTRACT ITSELF IS NOT IN THIS REPOSITORY. It lives beside the generator that wrote this
+file, in the toolset these sixteen repositories share, and the copy here is the half that is
+identical everywhere. This paragraph used to name a file that is not in the tree, which is the
+exact defect this file exists to detect.
 
 Every repository in this toolset makes checkable claims in its README on purpose, and a claim
 that was true when written and is false now is worse than one never made: it reads as evidence
@@ -37,8 +42,8 @@ def _resolves(claim: str) -> bool:
     """The resolution rule, in order: root, then src/, then a unique basename in the tree.
 
     The src/ step is the module-path convention rather than laziness. Prose says
-    `quidz/app.py` because that is the import path a reader types, and the file is at
-    `src/quidz/app.py`. Both are correct and a check that refused the first would be wrong.
+    `quidz/thing.py` because that is the import path a reader types, and the file is at
+    `src/quidz/thing.py`. Both are correct and a check that refused the first would be wrong.
     """
     if (REPO / claim).exists():
         return True
@@ -88,8 +93,8 @@ def test_this_repository_still_implements_every_contract_kind() -> None:
     """The contract is only a contract because something checks it is kept.
 
     Each kind above names the test in this repository that implements it. Delete or rename one
-    and this fails, saying which kind lost its implementation. Without this, DOCDRIFT.md would be
-    a description of what used to be true.
+    and this fails, saying which kind lost its implementation. Without it, the shared contract
+    would be a description of what used to be true.
     """
     suite = "\n".join(
         path.read_text(encoding="utf-8") for path in sorted((REPO / "tests").glob("test_*.py"))

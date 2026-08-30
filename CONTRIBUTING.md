@@ -28,7 +28,7 @@ uv run pytest -q
 ```
 
 Run every one of them. Running only the test suite is the most common way to be surprised by a
-red badge: formatting and typing are gates here, not suggestions.
+red badge: formatting, linting and typing are gates here, not suggestions.
 
 ## And the jobs that gate the pull request
 
