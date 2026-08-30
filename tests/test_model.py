@@ -15,6 +15,7 @@ from quidz.model import (
     apply_effect,
     derive_status,
 )
+from quidz.money import CurrencyMismatch
 
 FRESH = PaymentState(payment_id="pay_1", currency="EUR")
 
@@ -39,6 +40,37 @@ def test_over_capture_violates_amount_conservation(make_event: EventFactory) -> 
     state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
     with pytest.raises(AmountInvariantViolation, match="exceed the authorization"):
         apply_effect(state, make_event(EffectKind.CAPTURE, 1200))
+
+
+def test_a_capture_of_exactly_the_authorization_is_allowed_and_one_minor_unit_more_is_not(
+    make_event: EventFactory,
+) -> None:
+    """The boundary, not a round number well past it.
+
+    The test above captures 1200 against 1000, which passes just as happily against a guard
+    relaxed by one minor unit. One minor unit is what an off by one in a money invariant is
+    worth per payment, and it is the version of the mistake nobody notices.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    exact = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    assert (exact.captured_minor, derive_status(exact)) == (1000, "captured")
+    with pytest.raises(AmountInvariantViolation, match="exceed the authorization"):
+        apply_effect(state, make_event(EffectKind.CAPTURE, 1001, ref="ref_capture_2"))
+
+
+def test_an_event_in_another_currency_never_folds_into_the_aggregate(
+    make_event: EventFactory,
+) -> None:
+    """The aggregate holds one currency, and minor units of another are not units of it.
+
+    money.add and money.sub refuse this, but no production module calls either: the aggregate
+    is where every amount actually meets another amount, so this guard is the only thing in the
+    package that can raise CurrencyMismatch, and dlq's currency_mismatch reason code is
+    reachable only through it.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    with pytest.raises(CurrencyMismatch, match="does not match payment"):
+        apply_effect(state, make_event(EffectKind.CAPTURE, 1000, currency="USD"))
 
 
 def test_two_partial_refunds_summing_to_the_capture_derive_refunded(
@@ -117,6 +149,55 @@ def test_refund_reverse_after_a_succeeded_refund_reduces_refunded(
     assert (state.refunded_minor, derive_status(state)) == (0, "captured")
 
 
+@pytest.mark.parametrize("kind", [EffectKind.REFUND_FAIL, EffectKind.REFUND_REVERSE])
+def test_a_refund_correction_beyond_the_outstanding_refund_is_refused(
+    kind: EffectKind, make_event: EventFactory
+) -> None:
+    """Both regressive kinds, because the guard names both and a tuple can lose one.
+
+    A correction is money coming back to the merchant, so more of it than actually left drives
+    refunded_minor negative and derive_status reads the payment as captured again while the
+    child rows say otherwise. 400 exactly is the case the two tests below already cover, so the
+    boundary here is one minor unit past it.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    state = apply_effect(state, make_event(EffectKind.REFUND, 400, ref="re_1"))
+    with pytest.raises(AmountInvariantViolation, match="exceeds the outstanding refunded 400"):
+        apply_effect(state, make_event(kind, 401, ref="re_1"))
+
+
+def test_an_adjustment_below_the_money_already_taken_is_an_amount_violation(
+    make_event: EventFactory,
+) -> None:
+    """An authorization cannot be adjusted below what has already been captured against it.
+
+    Worth its own reason code as well as its own refusal: any adjustment on a captured payment
+    is also a rank regression a few lines further down, and illegal_transition sends whoever
+    reads the dead letter queue looking at delivery ordering rather than at an adjustment that
+    contradicts money the merchant has already taken.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000, sequence=100))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 600, sequence=200))
+    with pytest.raises(AmountInvariantViolation, match="below the captured 600"):
+        apply_effect(state, make_event(EffectKind.ADJUST_AUTH, 599, ref="adj_1", sequence=300))
+
+
+def test_a_negative_amount_is_refused_before_the_guards_below_it_ever_see_it(
+    make_event: EventFactory,
+) -> None:
+    """Every conservation check downstream compares against a ceiling, and negatives clear them.
+
+    A refund of -100 against a capture of 1000 is comfortably under the refund ceiling, so
+    nothing else refuses it, and folding it leaves refunded_minor at -100: money handed back to
+    the merchant with no refund_fail or refund_reverse row anywhere saying it was.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
+    state = apply_effect(state, make_event(EffectKind.CAPTURE, 1000))
+    with pytest.raises(AmountInvariantViolation, match="must not be negative"):
+        apply_effect(state, make_event(EffectKind.REFUND, -100, ref="re_1"))
+
+
 def test_refund_fail_after_a_full_refund_still_applies(make_event: EventFactory) -> None:
     # A full refund is the common shape and the one the rank ratchet used to make impossible:
     # the aggregate reached refunded, and every refund correction ranks below it.
@@ -166,6 +247,51 @@ def test_an_adjustment_is_how_a_hold_legitimately_changes(make_event: EventFacto
     state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000))
     state = apply_effect(state, make_event(EffectKind.ADJUST_AUTH, 1500))
     assert state.authorized_minor == 1500
+
+
+def test_the_newest_adjustment_is_the_hold_whichever_order_the_pair_arrives_in(
+    make_event: EventFactory,
+) -> None:
+    """Ordering is a rank, and within a rank the newest event wins by its own sequence.
+
+    adjust_auth is the only fold that reads the order it is processed in, so it is the only
+    kind that can falsify the second half of that claim. Both arrival orders of one pair, so a
+    guard that dropped every adjustment would fail the first line and one that dropped none
+    would fail the second.
+    """
+    authorized = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000, sequence=100))
+    older = make_event(EffectKind.ADJUST_AUTH, 500, ref="adj_10_05", sequence=200)
+    newer = make_event(EffectKind.ADJUST_AUTH, 1500, ref="adj_10_10", sequence=300)
+
+    in_order = apply_effect(apply_effect(authorized, older), newer)
+    out_of_order = apply_effect(apply_effect(authorized, newer), older)
+    assert (in_order.authorized_minor, in_order.last_sequence) == (1500, 300)
+    assert (out_of_order.authorized_minor, out_of_order.last_sequence) == (1500, 300)
+
+
+def test_a_stale_adjustment_cannot_raise_the_ceiling_the_over_capture_guard_reads(
+    make_event: EventFactory,
+) -> None:
+    """What the ordering costs when it goes wrong, in the direction that moves real money.
+
+    Fold the stale adjustment and the aggregate says 1500 is available to take, so a capture of
+    1500 clears the invariant against a hold the provider is only carrying 500 of. Neither
+    source disagrees afterwards either: the ledger and the provider both show a capture, and
+    reconciliation has nothing to compare the ceiling against.
+    """
+    state = apply_effect(FRESH, make_event(EffectKind.AUTHORIZE, 1000, sequence=100))
+    # The provider's newer word first: as of 10:10 the hold is 500.
+    state = apply_effect(
+        state, make_event(EffectKind.ADJUST_AUTH, 500, ref="adj_10_10", sequence=300)
+    )
+    # Then the 10:05 adjustment, late, carrying the total that was correct before that.
+    stale = apply_effect(
+        state, make_event(EffectKind.ADJUST_AUTH, 1500, ref="adj_10_05", sequence=200)
+    )
+
+    assert stale.authorized_minor == 500
+    with pytest.raises(AmountInvariantViolation, match="exceed the authorization"):
+        apply_effect(stale, make_event(EffectKind.CAPTURE, 1500))
 
 
 def test_rank_never_regresses_on_a_late_arriving_earlier_event(

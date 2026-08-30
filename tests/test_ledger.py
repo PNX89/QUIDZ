@@ -7,14 +7,24 @@ from pathlib import Path
 
 import pytest
 
-from conftest import authorize_body, capture_body, effect_rows, insert_delivery, refund_body
+from conftest import (
+    adyen_body,
+    authorize_body,
+    capture_body,
+    effect_rows,
+    insert_delivery,
+    refund_body,
+)
 from quidz import store
 from quidz.clock import FakeClock
 from quidz.dlq import RetryPolicy
 from quidz.events import Provider, from_stripe
 from quidz.inbox import claim, drain, drain_until_idle
 from quidz.ledger import ApplyOutcome, apply_delivery, load_payment
-from quidz.model import AmountInvariantViolation
+from quidz.model import AmountInvariantViolation, PaymentState
+
+# The two aggregates the permutation stream builds, plus every effect row behind them.
+Outcome = tuple[PaymentState | None, PaymentState | None, tuple[tuple[object, ...], ...]]
 
 
 def deliver(conn: sqlite3.Connection, delivery_id: str, raw: bytes) -> ApplyOutcome:
@@ -120,26 +130,58 @@ def test_twenty_seeded_permutations_reach_one_terminal_aggregate(tmp_path: Path)
 
     A fixed stream with duplicates injected, replayed in twenty seeded permutations, has to
     land on the same aggregate and the same effect rows every time.
+
+    The stream carries an authorisation and two adjustments of it because adjust_auth is the
+    only fold whose result depends on the order it is processed in: authorize and capture are
+    refused after the first, void and expire set a flag, and every other kind is additive. A
+    stream without one cannot fail this test however the shuffle lands, which is what let the
+    aggregate reach two different holds while this test, the one the README names as pinning
+    ordering tolerance, stayed green.
     """
     stream = [
-        ("evt_auth", authorize_body("evt_auth", minor=1000)),
-        ("evt_cap", capture_body("evt_cap", minor=1000)),
-        ("evt_ref", refund_body("evt_ref", minor=400)),
-        ("evt_cap_twin", capture_body("evt_cap_twin", minor=1000)),
-        ("evt_ref_twin", refund_body("evt_ref_twin", minor=400)),
+        (Provider.STRIPE, "evt_auth", authorize_body("evt_auth", minor=1000)),
+        (Provider.STRIPE, "evt_cap", capture_body("evt_cap", minor=1000)),
+        (Provider.STRIPE, "evt_ref", refund_body("evt_ref", minor=400)),
+        (Provider.STRIPE, "evt_cap_twin", capture_body("evt_cap_twin", minor=1000)),
+        (Provider.STRIPE, "evt_ref_twin", refund_body("evt_ref_twin", minor=400)),
+        (
+            Provider.ADYEN,
+            "PSPAUTH:AUTHORISATION",
+            adyen_body("PSPAUTH", minor=1000, event_date="2026-08-18T10:00:00+00:00"),
+        ),
+        (
+            Provider.ADYEN,
+            "PSPADJA:AUTHORISATION_ADJUSTMENT",
+            adyen_body(
+                "PSPADJA",
+                "AUTHORISATION_ADJUSTMENT",
+                minor=500,
+                event_date="2026-08-18T10:05:00+00:00",
+            ),
+        ),
+        (
+            Provider.ADYEN,
+            "PSPADJB:AUTHORISATION_ADJUSTMENT",
+            adyen_body(
+                "PSPADJB",
+                "AUTHORISATION_ADJUSTMENT",
+                minor=1500,
+                event_date="2026-08-18T10:10:00+00:00",
+            ),
+        ),
     ]
     rng = random.Random(0)
-    outcomes: set[tuple[object, ...]] = set()
+    outcomes: set[Outcome] = set()
     for run in range(20):
         order = stream[:]
         rng.shuffle(order)
         connection = store.connect(tmp_path / f"run_{run}.db")
         store.init_schema(connection)
         clock = FakeClock()
-        for identity, raw in order:
+        for provider, identity, raw in order:
             claim(
                 connection,
-                provider=Provider.STRIPE,
+                provider=provider,
                 identity=identity,
                 raw=raw,
                 headers={},
@@ -147,7 +189,21 @@ def test_twenty_seeded_permutations_reach_one_terminal_aggregate(tmp_path: Path)
             )
             clock.advance(0.05)
         drain_until_idle(connection, clock=clock, policy=RetryPolicy(), max_passes=12)
-        state = load_payment(connection, "pi_1")
-        outcomes.add((state, tuple(effect_rows(connection))))
+        outcomes.add(
+            (
+                load_payment(connection, "pi_1"),
+                load_payment(connection, "order-1"),
+                tuple(effect_rows(connection)),
+            )
+        )
         connection.close()
     assert len(outcomes) == 1
+
+    # One outcome is only the right outcome if it is the one the stream describes. Without
+    # these, a bug that parked every adjustment for ever would agree with itself twenty times
+    # over and read exactly like a pass.
+    stripe_state, adyen_state, rows = next(iter(outcomes))
+    assert stripe_state is not None and adyen_state is not None
+    assert (stripe_state.captured_minor, stripe_state.refunded_minor) == (1000, 400)
+    assert adyen_state.authorized_minor == 1500
+    assert len(rows) == 6

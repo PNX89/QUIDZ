@@ -28,7 +28,7 @@ EXCEPTION REPORT
   outbound      BLOCKED
   ingest        open
   blocked_ids   order-CXSHRQTY, order:MB9WJKNY, pi_C29cZ86wXAsjLR2X, pi_W7bXVRVMG8MCWwSh
-  rationale     1 critical and 6 break findings, exposure 31022 minor units; outbound blocked for 4 id(s) under scope=payment
+  rationale     1 critical and 6 break findings, exposure 19600 GBP, 10422 JPY, 1000 USD; outbound blocked for 4 id(s) under scope=payment
 
   SEVERITY KIND                      PAYMENT                DELTA  DETAIL
   CRITICAL missing_locally           order-CXSHRQTY         12100  order-CXSHRQTY is at the provider and not in the ledger, 346806s old

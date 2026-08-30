@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `quidz.model`: an `adjust_auth` whose sequence is older than the newest event already folded
+  into the aggregate is now a no-op rather than the value that wins. `PaymentState.last_sequence`
+  was maintained and never read, so the last adjustment to be processed set the hold, and
+  `authorized_minor` is the ceiling the over-capture guard compares against. One stream of three
+  events reached two different terminal aggregates depending on arrival order.
+- `quidz.reconcile`: `gate` evaluated its materiality threshold by value against a sum of
+  `delta_minor` across currencies, which is the addition `quidz.money` exists to refuse. Exposure
+  is now totalled per currency and the rationale states a figure for each, so unrelated drift in
+  unrelated currencies no longer pools into a total that blocks payments none of which crossed
+  the threshold alone. The count threshold is a count of findings and is unchanged.
+
+### Added
+
+- Tests for the guards, branches and constants the suite could not previously fail on: the
+  Stripe tolerance value itself rather than only the comparison that uses it, the retry budget
+  read back and written through `drain`, both routes to `quidz reconcile` exit 1 separately, the
+  `--assert-terminal` mismatch, `quidz demo --http` against the in-process transport, the
+  aggregate's currency and negative-amount guards, the over-capture boundary, and the gate's
+  currency and batch scopes.
+
 ## [0.1.0] - 2026-08-18
 
 ### Added

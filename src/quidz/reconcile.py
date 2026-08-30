@@ -554,6 +554,33 @@ def reconcile(
     )
 
 
+def _exposure_by_currency(breaks: Sequence[Finding]) -> dict[str, int]:
+    """Drift totals per currency, never one number across them.
+
+    Minor units of two currencies are not units of anything: the ISO exponent alone is 0 for
+    JPY and 3 for BHD before an exchange rate is considered, so adding them is precisely the
+    arithmetic money.add refuses, and quidz.money exists to keep that refusal in one place. A
+    single number would also pool unrelated drift in unrelated currencies into a total that
+    blocks payments none of which crossed the threshold on its own.
+
+    No reference currency is converted to, deliberately: rates are listed under Limitations as
+    absent, and a materiality threshold read per currency is honest without one.
+    """
+    totals: dict[str, int] = {}
+    for finding in breaks:
+        if finding.delta_minor and finding.currency:
+            totals[finding.currency] = totals.get(finding.currency, 0) + abs(finding.delta_minor)
+    return totals
+
+
+def _exposure_text(exposure: Mapping[str, int]) -> str:
+    """Largest first, so the rationale opens on the number that decided it."""
+    if not exposure:
+        return "no measured exposure"
+    ordered = sorted(exposure.items(), key=lambda item: (-item[1], item[0]))
+    return ", ".join(f"{total} {currency}" for currency, total in ordered)
+
+
 def gate(report: ExceptionReport, *, policy: GatePolicy, now: float) -> GateDecision:
     """Decide whether outbound money movement is blocked, and for exactly which ids.
 
@@ -561,11 +588,17 @@ def gate(report: ExceptionReport, *, policy: GatePolicy, now: float) -> GateDeci
     question of size. BREAK findings have to clear a materiality threshold by count or by
     value first, because a global halt on one small drifting row is a self inflicted
     availability incident.
+
+    The count is a property of the finding set and is read across all of them. The value is
+    money, so it is read against one currency at a time and the threshold means what it says in
+    each of them.
     """
     criticals = [f for f in report.findings if f.severity is Severity.CRITICAL]
     breaks = [f for f in report.findings if f.severity is Severity.BREAK]
-    exposure = sum(abs(f.delta_minor or 0) for f in breaks)
-    material = len(breaks) >= policy.materiality_count or exposure >= policy.materiality_value_minor
+    exposure = _exposure_by_currency(breaks)
+    material = len(breaks) >= policy.materiality_count or any(
+        total >= policy.materiality_value_minor for total in exposure.values()
+    )
     effective = criticals + (breaks if material else [])
 
     if policy.scope == "batch":
@@ -595,7 +628,7 @@ def gate(report: ExceptionReport, *, policy: GatePolicy, now: float) -> GateDeci
     elif blocked:
         rationale = (
             f"{len(criticals)} critical and {len(breaks) if material else 0} break findings, "
-            f"exposure {exposure} minor units; outbound blocked for {len(ids)} id(s) "
+            f"exposure {_exposure_text(exposure)}; outbound blocked for {len(ids)} id(s) "
             f"under scope={policy.scope}"
         )
     else:
