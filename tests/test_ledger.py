@@ -18,10 +18,11 @@ from conftest import (
 from quidz import store
 from quidz.clock import FakeClock
 from quidz.dlq import RetryPolicy
-from quidz.events import Provider, from_stripe
+from quidz.events import CanonicalEvent, Provider, from_stripe
 from quidz.inbox import claim, drain, drain_until_idle
 from quidz.ledger import ApplyOutcome, apply_delivery, load_payment
-from quidz.model import AmountInvariantViolation, PaymentState
+from quidz.model import AmountInvariantViolation, EffectKind, PaymentState
+from quidz.money import Money
 
 # The two aggregates the permutation stream builds, plus every effect row behind them.
 Outcome = tuple[PaymentState | None, PaymentState | None, tuple[tuple[object, ...], ...]]
@@ -49,6 +50,46 @@ def test_five_deliveries_of_one_event_produce_exactly_one_effect_row(
         drain(conn, clock=clock, policy=RetryPolicy())
         clock.advance(60.0)
     assert conn.execute("SELECT count(*) AS n FROM effects").fetchone()["n"] == 1
+
+
+def _event(kind: EffectKind, *, occurred_at: float, sequence: int) -> CanonicalEvent:
+    return CanonicalEvent(
+        provider=Provider.STRIPE,
+        identity=f"evt_{kind.value}_{sequence}",
+        payment_id="pay_1",
+        kind=kind,
+        provider_ref=f"ref_{kind.value}_{sequence}",
+        amount=Money(1000, "EUR"),
+        occurred_at=occurred_at,
+        sequence=sequence,
+        raw_amount_value="1000",
+        raw_currency="EUR",
+    )
+
+
+def test_updated_at_is_the_newest_provider_time_folded_in_not_whichever_applied_last(
+    conn: sqlite3.Connection,
+) -> None:
+    """The upsert's own max() is an invariant enforced only in the SQL that writes it.
+
+    updated_at is absent from _STATE_COLUMNS, so load_payment, list_payments, every report
+    and every other test in this suite never read it back; deleting the max() and using
+    excluded.updated_at outright leaves the full suite green. This applies a delivery stamped
+    with a later provider time first and one stamped earlier second, the out of order delivery
+    the comment beside the upsert names, and reads the column back with a raw query since
+    load_payment has nothing to return it through.
+    """
+    later = _event(EffectKind.AUTHORIZE, occurred_at=2000.0, sequence=0)
+    earlier = _event(EffectKind.CAPTURE_FAIL, occurred_at=1000.0, sequence=1)
+    with store.write_tx(conn):
+        insert_delivery(conn, "stripe:evt_later")
+        apply_delivery(conn, "stripe:evt_later", later)
+        insert_delivery(conn, "stripe:evt_earlier")
+        apply_delivery(conn, "stripe:evt_earlier", earlier)
+    row = conn.execute(
+        "SELECT updated_at FROM payments WHERE payment_id = ?", ("pay_1",)
+    ).fetchone()
+    assert row["updated_at"] == 2000.0
 
 
 def test_the_duplicate_path_reports_a_noop(conn: sqlite3.Connection) -> None:

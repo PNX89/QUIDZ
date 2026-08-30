@@ -1,7 +1,7 @@
 {
-  "tests": 172,
+  "tests": 183,
   "python": "3.11 to 3.14",
   "release": "v0.1.0",
-  "captured": "2026-08-30",
+  "captured": "2026-08-31",
   "runUrl": null
 }

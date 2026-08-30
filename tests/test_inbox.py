@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from conftest import authorize_body, capture_body
+from conftest import authorize_body, capture_body, stripe_body
 from quidz.clock import FakeClock
 from quidz.dlq import RetryPolicy
 from quidz.events import Provider
@@ -72,6 +72,41 @@ def test_an_expired_lease_is_reclaimable(conn: sqlite3.Connection) -> None:
     clock.advance(31.0)
     result = take(conn, "evt_1", authorize_body("evt_1"), clock)
     assert (result.accepted, result.reason) == (True, "lease_reclaimed")
+
+
+def test_a_redelivery_mid_backoff_keeps_the_schedule_drain_set_instead_of_resetting_it(
+    conn: sqlite3.Connection,
+) -> None:
+    """A jittered retry wait and a dead holder's expired lease are not the same state.
+
+    claim() reclaims a row whenever its lease is absent or past, and drain() leaves a row in
+    exactly that shape on purpose between retries: no lease, and next_attempt_at set to the
+    delay it drew. Before this fix, a redelivery arriving during that wait fell into the same
+    branch as a genuinely abandoned claim and reset next_attempt_at to now, cancelling the
+    backoff drain() had just scheduled.
+    """
+    raw = stripe_body(
+        "evt_1",
+        "payment_intent.processing",
+        {"id": "pi_1", "object": "payment_intent", "amount": 1000, "currency": "eur"},
+    )
+    clock = FakeClock()
+    result = take(conn, "evt_1", raw, clock)
+    drain(conn, clock=clock, policy=RetryPolicy(seed=0))
+    scheduled = conn.execute(
+        "SELECT attempts, next_attempt_at, lease_expires_at FROM deliveries WHERE delivery_id = ?",
+        (result.delivery_id,),
+    ).fetchone()
+    assert scheduled["attempts"] == 1
+    assert scheduled["lease_expires_at"] is None
+    assert scheduled["next_attempt_at"] > clock.now()
+
+    redelivered = take(conn, "evt_1", raw, clock)
+    assert (redelivered.accepted, redelivered.reason) == (True, "lease_reclaimed")
+    after = conn.execute(
+        "SELECT next_attempt_at FROM deliveries WHERE delivery_id = ?", (result.delivery_id,)
+    ).fetchone()
+    assert after["next_attempt_at"] == scheduled["next_attempt_at"]
 
 
 def test_a_crash_between_claim_and_apply_leaves_work_to_redo_not_a_false_success(

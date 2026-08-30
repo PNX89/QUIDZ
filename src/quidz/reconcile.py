@@ -75,7 +75,7 @@ class DriftKind(StrEnum):
 SEVERITY_MISSING_LOCALLY = Severity.CRITICAL
 # The ledger recorded an effect the provider does not show; real, but the exposure is bounded.
 SEVERITY_MISSING_REMOTELY = Severity.BREAK
-# Two aggregates for one reference means every later total on that payment is wrong.
+# Two aggregates for one payment id means every later total on that payment is wrong.
 SEVERITY_DUPLICATE_LOCAL = Severity.BREAK
 # Two provider records for one order is a double authorization, real money and expensive.
 SEVERITY_DUPLICATE_REMOTE = Severity.CRITICAL

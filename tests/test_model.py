@@ -7,6 +7,7 @@ import pytest
 
 from conftest import EventFactory
 from quidz.model import (
+    STATUSES,
     AmountInvariantViolation,
     EffectKind,
     IllegalTransition,
@@ -14,6 +15,7 @@ from quidz.model import (
     PrematureEvent,
     apply_effect,
     derive_status,
+    state_rank,
 )
 from quidz.money import CurrencyMismatch
 
@@ -329,3 +331,52 @@ def test_a_missing_parent_directory_says_so_instead_of_unable_to_open_database_f
     missing.parent.mkdir()
     with contextlib.closing(store.connect(missing)) as conn:
         assert conn.execute("select 1").fetchone()[0] == 1
+
+
+def test_every_declared_status_is_reachable_and_ranked() -> None:
+    """STATUSES is exported as the definitive list, and nothing was reading it.
+
+    Not derive_status, which returns the string literals directly. Not state_rank, which keeps
+    its own ranking dict. Not the CLI, not the reconciler, not another test. The README's own
+    nine-status paragraph and STATUSES could each drift from derive_status, and from each
+    other, with nothing going red. This builds one fixture per status by construction rather
+    than by replay, so it does not depend on apply_effect reaching every branch, and checks
+    STATUSES against derive_status's actual range and against state_rank in one pass: a member
+    state_rank cannot look up raises ValueError here instead of staying a promise nothing
+    keeps.
+    """
+    fixtures: dict[str, PaymentState] = {
+        "pending": PaymentState(payment_id="p", currency="EUR"),
+        "authorized": PaymentState(payment_id="p", currency="EUR", authorized_minor=1000),
+        "capture_failed": PaymentState(
+            payment_id="p", currency="EUR", authorized_minor=1000, capture_failed_minor=1000
+        ),
+        "voided": PaymentState(payment_id="p", currency="EUR", authorized_minor=1000, voided=True),
+        "expired": PaymentState(
+            payment_id="p", currency="EUR", authorized_minor=1000, expired=True
+        ),
+        "partially_captured": PaymentState(
+            payment_id="p", currency="EUR", authorized_minor=1000, captured_minor=400
+        ),
+        "captured": PaymentState(
+            payment_id="p", currency="EUR", authorized_minor=1000, captured_minor=1000
+        ),
+        "partially_refunded": PaymentState(
+            payment_id="p",
+            currency="EUR",
+            authorized_minor=1000,
+            captured_minor=1000,
+            refunded_minor=400,
+        ),
+        "refunded": PaymentState(
+            payment_id="p",
+            currency="EUR",
+            authorized_minor=1000,
+            captured_minor=1000,
+            refunded_minor=1000,
+        ),
+    }
+    assert set(fixtures) == set(STATUSES)
+    for expected_status, state in fixtures.items():
+        assert derive_status(state) == expected_status
+        assert isinstance(state_rank(expected_status), int)

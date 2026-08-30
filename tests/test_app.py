@@ -95,6 +95,27 @@ def test_the_adyen_route_acknowledges_with_the_documented_body(client: TestClien
     assert (response.status_code, response.text) == (200, "[accepted]")
 
 
+def test_a_tampered_adyen_signature_is_a_401(client: TestClient) -> None:
+    # SignatureError is the one branch of the Adyen route that answers 401, mirroring Stripe's
+    # own 409 for in-flight work: every other test that reaches this route signs correctly, so
+    # nothing had exercised it.
+    delivery = first(Provider.ADYEN)
+    item = json.loads(delivery.raw)
+    item["additionalData"]["hmacSignature"] = "not-the-real-signature"
+    envelope = {"live": "false", "notificationItems": [{"NotificationRequestItem": item}]}
+    response = client.post("/webhooks/adyen", json=envelope)
+    assert response.status_code == 401
+
+
+def test_healthz_reports_the_schema_version_the_database_was_stamped_with(
+    client: TestClient,
+) -> None:
+    from quidz import store
+
+    response = client.get("/healthz")
+    assert response.json() == {"status": "ok", "schema_version": store.SCHEMA_VERSION}
+
+
 def test_a_body_that_verifies_but_will_not_parse_is_a_client_error(client: TestClient) -> None:
     # Signed with a live secret and still undecodable. json.loads raises JSONDecodeError here
     # and UnicodeDecodeError for the second body, and neither is an EventError, so both used

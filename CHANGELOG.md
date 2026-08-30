@@ -19,6 +19,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is now totalled per currency and the rationale states a figure for each, so unrelated drift in
   unrelated currencies no longer pools into a total that blocks payments none of which crossed
   the threshold alone. The count threshold is a count of findings and is unchanged.
+- `quidz.inbox`: `claim()` reclaimed a row whenever its lease was absent or past, and `drain()`
+  leaves a row in exactly that shape on purpose between retries: no lease, `next_attempt_at` set
+  to the jittered delay it drew. A redelivery arriving during that wait fell into the same branch
+  as a genuinely abandoned claim and reset `next_attempt_at` to now, cancelling the backoff drain
+  had just scheduled. The schedule now survives a redelivery once a row has been drained at least
+  once; a redelivery still refreshes the stored payload, per Adyen's own instruction to use the
+  latest event's details.
 
 ### Added
 
@@ -28,6 +35,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--assert-terminal` mismatch, `quidz demo --http` against the in-process transport, the
   aggregate's currency and negative-amount guards, the over-capture boundary, and the gate's
   currency and batch scopes.
+- More of the same, from the LOW severity pass: `model.STATUSES` against `derive_status` and
+  `state_rank` over one fixture per status, the ledger's `updated_at` monotonicity across an out
+  of order delivery, every `Simulator` break mode against an observable difference in the
+  deliveries or the provider payment list rather than against the enum it is drawn from,
+  `store.SCHEMA_VERSION` against a live `PRAGMA user_version`, the effects table's foreign key
+  against an unknown delivery id, the Adyen route's 401 on a bad signature, `/healthz`, and three
+  CLI usage errors: a delivery log with no records, `--assert-terminal` against a log that never
+  recorded one, and `reconcile` with the provider snapshot missing rather than merely unreadable.
 
 ## [0.1.0] - 2026-08-18
 

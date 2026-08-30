@@ -150,6 +150,60 @@ def test_a_provider_snapshot_that_is_not_utf_8_is_a_usage_error(
     assert (code, "is not readable" in capsys.readouterr().err) == (2, True)
 
 
+def test_replay_refuses_a_log_that_carries_no_delivery_records(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A terminal line with nothing to replay against it: valid JSONL, valid schema, and the
+    # kind of file a log rotation gone wrong could produce.
+    log = tmp_path / "empty.jsonl"
+    log.write_text(json.dumps({"kind": "terminal", "payments": {}}) + "\n", encoding="utf-8")
+    code = main(["replay", str(log), "--db", str(tmp_path / "replayed.db")])
+    assert (code, "carries no delivery records" in capsys.readouterr().err) == (2, True)
+
+
+def test_replay_with_assert_terminal_refuses_a_log_that_never_recorded_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # --assert-terminal has nothing to assert against here, which is a different defect from
+    # the mismatch the sibling test below covers, and from the log-with-no-deliveries case
+    # above: this log has deliveries, just no recorded terminal state at all.
+    db_path = run_demo(tmp_path)
+    capsys.readouterr()
+    records = [
+        line
+        for line in Path(f"{db_path}.jsonl").read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["kind"] != "terminal"
+    ]
+    assert records, "the demo run logged no deliveries to replay"
+    stripped = tmp_path / "no_terminal.jsonl"
+    stripped.write_text("\n".join(records) + "\n", encoding="utf-8")
+    code = main(
+        ["replay", str(stripped), "--db", str(tmp_path / "replayed.db"), "--assert-terminal"]
+    )
+    assert (code, "records no terminal state to assert against" in capsys.readouterr().err) == (
+        2,
+        True,
+    )
+
+
+def test_reconcile_without_a_provider_snapshot_says_to_run_demo_first(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Absent is not the same defect as unreadable: the sibling test above corrupts the bytes
+    # of a snapshot that exists, this one deletes the snapshot demo just wrote, and the two
+    # used to produce the same message because nothing distinguished them.
+    db_path = run_demo(tmp_path)
+    capsys.readouterr()
+    Path(f"{db_path}.remote.json").unlink()
+    code = main(["reconcile", "--db", str(db_path)])
+    err = capsys.readouterr().err
+    assert (code, "no provider snapshot beside" in err, "is not readable" in err) == (
+        2,
+        True,
+        False,
+    )
+
+
 def test_replay_reproduces_the_terminal_state_of_the_run_that_logged_it(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

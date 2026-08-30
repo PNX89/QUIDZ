@@ -167,19 +167,28 @@ def claim(
         except sqlite3.IntegrityError:
             pass
         row = conn.execute(
-            "SELECT state, lease_expires_at FROM deliveries WHERE delivery_id = ?", (delivery_id,)
+            "SELECT state, lease_expires_at, attempts, next_attempt_at FROM deliveries "
+            "WHERE delivery_id = ?",
+            (delivery_id,),
         ).fetchone()
         lease = row["lease_expires_at"]
         if row["state"] != DeliveryState.CLAIMED:
             return ClaimResult(delivery_id, False, "duplicate")
         if lease is not None and lease > now:
             return ClaimResult(delivery_id, False, "in_progress")
-        # The lease expired, so the previous holder died before applying anything. Adyen's
-        # instruction for a repeat delivery is to use the details from the latest event.
+        # Two different situations both reach here, and only one of them means the delivery
+        # is due right now. attempts == 0 with a lease that has passed means the previous
+        # holder died before drain() ever ran, so the redelivery should run immediately.
+        # attempts > 0 with no lease at all means drain() itself cleared the lease and parked
+        # this row in its own jittered backoff; a redelivery there refreshes the payload, per
+        # Adyen's instruction to use the details from the latest event, but must not cancel
+        # the wait drain() already scheduled, or a chatty provider skips full jitter backoff
+        # on every retry.
+        next_attempt_at = now if row["attempts"] == 0 else row["next_attempt_at"]
         conn.execute(
             "UPDATE deliveries SET raw = ?, headers = ?, lease_expires_at = ?, "
             "next_attempt_at = ? WHERE delivery_id = ?",
-            (raw, encoded, now + lease_seconds, now, delivery_id),
+            (raw, encoded, now + lease_seconds, next_attempt_at, delivery_id),
         )
         return ClaimResult(delivery_id, True, "lease_reclaimed")
 

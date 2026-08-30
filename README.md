@@ -296,7 +296,7 @@ than an event, because neither provider sends a per-payment settled webhook.
 |---|---|---|---|
 | `MISSING_LOCALLY` | A | CRITICAL | the provider has it, the ledger does not |
 | `MISSING_REMOTELY` | A | BREAK | the ledger has it, the provider does not |
-| `DUPLICATE_LOCAL` | A | BREAK | two local aggregates for one provider reference |
+| `DUPLICATE_LOCAL` | A | BREAK | two local aggregates for one payment id |
 | `DUPLICATE_REMOTE` | A | CRITICAL | a double authorization, real and expensive |
 | `AMOUNT_MISMATCH` | A | BREAK | compares the amount vector, not one scalar |
 | `PARTIAL_STATE_DIVERGENCE` | A | WARN | equal net position, different capture and refund split |
@@ -422,8 +422,10 @@ not have been in it.
 currencies. Nothing rounds, because there is no split or allocation path here. A hardcoded
 `* 100` is a defect: under ISO 4217, exponent 0 covers BIF, CLP, DJF, GNF, ISK, JPY, KMF, KRW,
 PYG, RWF, UGX, VND, VUV, XAF, XOF and XPF; exponent 3 covers BHD, IQD, JOD, KWD, LYD, OMR and
-TND; everything else is 2. The JPY row in the demo output prints `5300 JPY` with no fractional
-part for exactly this reason.
+TND; everything else this repo handles is 2. ISO also defines exponent 4 for the CLF and UYW
+units of account and no minor unit at all for the metal and special codes, none of which a PSP
+settles in. The JPY row in the demo output prints `5300 JPY` with no fractional part for
+exactly this reason.
 
 The gate reads its materiality threshold by value one currency at a time, for the same reason.
 A single total across currencies would be the addition `add` refuses, it would mean a different
@@ -599,10 +601,10 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-172 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
-second on this machine. That count is asserted against a real collection run, because a number
-in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
-wheel ships `py.typed` and that is a promise to whoever installs it.
+183 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite in about
+a second on this machine. That count is asserted against a real collection run, because a
+number in a README is a number nobody updates. `mypy` runs `--strict` over both the package
+and the tests, because the wheel ships `py.typed` and that is a promise to whoever installs it.
 `pyproject.toml` sets `filterwarnings = ["error"]` with an empty ignore list, which is what makes
 the `server` extra's lower bounds load-bearing rather than decorative: below roughly
 `fastapi>=0.128` with `pydantic>=2.12.1`, FastAPI's pydantic v1 compatibility shim emits a
