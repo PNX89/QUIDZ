@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 from types import MappingProxyType
 
 from quidz.reconcile import (
@@ -82,6 +83,41 @@ def test_blocking_is_scoped_to_the_affected_payment_and_spares_the_rest() -> Non
     assert decision.blocked_ids == ("pay_bad",)
 
 
+def test_blocking_by_currency_names_the_currencies_rather_than_the_payments() -> None:
+    # GateDecision documents what blocked_ids holds under each scope, and the payment scope was
+    # the only one anything ran, so the other two branches were prose with code behind them.
+    decision = gate(
+        report(
+            finding(payment_id="pay_eur", currency="EUR"),
+            finding(payment_id="pay_jpy", currency="JPY"),
+        ),
+        policy=GatePolicy(scope="currency"),
+        now=NOW,
+    )
+    assert (decision.outbound_blocked, decision.blocked_ids) == (True, ("EUR", "JPY"))
+
+
+def test_blocking_the_batch_names_the_batch_and_nothing_finer() -> None:
+    # The whole payout stops, so naming the payments would invite somebody to release the rest.
+    decision = gate(
+        report(finding(payment_id="pay_1"), finding(payment_id="pay_2")),
+        policy=GatePolicy(scope="batch"),
+        now=NOW,
+    )
+    assert (decision.outbound_blocked, decision.blocked_ids) == (True, ("*",))
+
+
+def test_every_scope_the_policy_offers_has_a_case_of_its_own_above() -> None:
+    """A fourth scope must not be free to add.
+
+    The three names are written out here rather than read off the annotation and fed back into
+    a loop: a test parametrised from the type it is checking covers one case fewer the moment
+    somebody deletes an entry, and stays green while it does it.
+    """
+    scope = typing.get_type_hints(GatePolicy)["scope"]
+    assert set(typing.get_args(scope)) == {"payment", "currency", "batch"}
+
+
 def test_a_break_below_both_materiality_thresholds_does_not_block() -> None:
     decision = gate(
         report(finding(DriftKind.AMOUNT_MISMATCH, Severity.BREAK, delta=100)),
@@ -89,6 +125,50 @@ def test_a_break_below_both_materiality_thresholds_does_not_block() -> None:
         now=NOW,
     )
     assert (decision.outbound_blocked, decision.blocked_ids) == (False, ())
+
+
+def test_two_immaterial_breaks_in_different_currencies_do_not_pool_into_a_material_one() -> None:
+    """A total across currencies is the addition quidz.money exists to refuse.
+
+    Neither of these crosses the value threshold on its own, and 6000 JPY and 5000 EUR are not
+    11000 of anything: the ISO exponent alone is 0 for one and 2 for the other. Summed, they
+    blocked two payments neither of which was material, which is the availability incident the
+    threshold is there to avoid.
+    """
+    jpy = finding(
+        DriftKind.AMOUNT_MISMATCH, Severity.BREAK, payment_id="pay_jpy", delta=-6000, currency="JPY"
+    )
+    eur = finding(
+        DriftKind.AMOUNT_MISMATCH, Severity.BREAK, payment_id="pay_eur", delta=5000, currency="EUR"
+    )
+    policy = GatePolicy(materiality_count=5, materiality_value_minor=10_000)
+    decision = gate(report(jpy, eur), policy=policy, now=NOW)
+    assert (decision.outbound_blocked, decision.blocked_ids) == (False, ())
+
+
+def test_a_currency_over_the_threshold_blocks_and_the_rationale_states_each_total() -> None:
+    """The same two findings with the JPY one over the line on its own.
+
+    The rationale carries a figure per currency rather than one number, because one number is
+    a different amount of real money in every currency it is compared against: 10000 minor
+    units is 100.00 EUR, 10.000 BHD and 10000 VND, and the last of those is small change.
+    """
+    jpy = finding(
+        DriftKind.AMOUNT_MISMATCH,
+        Severity.BREAK,
+        payment_id="pay_jpy",
+        delta=-12_000,
+        currency="JPY",
+    )
+    eur = finding(
+        DriftKind.AMOUNT_MISMATCH, Severity.BREAK, payment_id="pay_eur", delta=5000, currency="EUR"
+    )
+    policy = GatePolicy(materiality_count=5, materiality_value_minor=10_000)
+    decision = gate(report(jpy, eur), policy=policy, now=NOW)
+    assert (decision.outbound_blocked, decision.blocked_ids) == (True, ("pay_eur", "pay_jpy"))
+    # The clause that carries the figures, not the sentence: every rationale contains digits.
+    exposure = decision.rationale.split("exposure ", 1)[1].split(";", 1)[0]
+    assert exposure == "12000 JPY, 5000 EUR"
 
 
 def test_an_in_flight_item_inside_the_grace_window_does_not_block() -> None:
