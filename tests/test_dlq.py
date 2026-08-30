@@ -5,7 +5,7 @@ import sqlite3
 
 import pytest
 
-from conftest import adyen_body, authorize_body
+from conftest import adyen_body, authorize_body, stripe_body
 from quidz import inbox
 from quidz.clock import FakeClock
 from quidz.dlq import (
@@ -19,12 +19,28 @@ from quidz.dlq import (
 from quidz.events import Provider
 from quidz.inbox import DeliveryState, claim, drain, drain_until_idle
 from quidz.ledger import apply_delivery, load_payment
+from quidz.money import CurrencyMismatch
 
 
 def take(conn: sqlite3.Connection, identity: str, raw: bytes, clock: FakeClock) -> str:
     return claim(
         conn, provider=Provider.STRIPE, identity=identity, raw=raw, headers={}, clock=clock
     ).delivery_id
+
+
+def unmodelled_body(event_id: str) -> bytes:
+    """A real Stripe event type this ledger does not model: retryable, capped at three."""
+    return stripe_body(
+        event_id,
+        "payment_intent.processing",
+        {"id": f"pi_{event_id}", "object": "payment_intent", "amount": 1000, "currency": "eur"},
+    )
+
+
+def poison(conn: sqlite3.Connection, count: int, clock: FakeClock) -> None:
+    for index in range(count):
+        take(conn, f"evt_poison_{index}", unmodelled_body(f"evt_poison_{index}"), clock)
+        clock.advance(0.01)
 
 
 def delivery(conn: sqlite3.Connection) -> sqlite3.Row:
@@ -91,6 +107,46 @@ def test_the_global_budget_stops_retries_below_max_attempts() -> None:
     assert should_retry(policy, reason, 1, budget_used=100) is False
 
 
+def test_the_budget_is_spent_across_drain_passes_and_not_once_per_pass(
+    conn: sqlite3.Connection,
+) -> None:
+    """The test above hands should_retry a number. This one makes the drain loop find it.
+
+    A per attempt cap alone still lets ten thousand poisoned deliveries retry in lockstep,
+    which is the whole reason budget_per_minute exists, and the budget only does that if the
+    drain loop reads the stored counter, passes it in and writes the new value back. Written
+    as two passes inside one minute on purpose: a pass that only counted in memory would
+    start the second pass at zero and retry the same three deliveries all over again.
+    """
+    clock = FakeClock()
+    policy = RetryPolicy(budget_per_minute=3, seed=0)
+    poison(conn, 10, clock)
+
+    first = drain(conn, clock=clock, policy=policy)
+    # Well past the longest backoff this policy can draw on attempt one, and still inside the
+    # minute the first pass spent its budget in.
+    clock.advance(30.0)
+    second = drain(conn, clock=clock, policy=policy)
+
+    assert (first.retried, first.dead_lettered) == (3, 7)
+    assert (second.retried, second.dead_lettered) == (0, 3)
+
+
+def test_the_budget_refills_on_the_next_minute_rather_than_staying_spent(
+    conn: sqlite3.Connection,
+) -> None:
+    """A budget that never refills is an outage of its own: the queue stops draining for good."""
+    clock = FakeClock()
+    policy = RetryPolicy(budget_per_minute=3, seed=0)
+    poison(conn, 10, clock)
+
+    first = drain(conn, clock=clock, policy=policy)
+    clock.advance(60.0)
+    second = drain(conn, clock=clock, policy=policy)
+
+    assert (first.retried, second.retried, second.dead_lettered) == (3, 3, 0)
+
+
 def test_jitter_from_a_seeded_generator_reproduces_exactly() -> None:
     policy = RetryPolicy(seed=0)
     first = [
@@ -129,6 +185,50 @@ def test_the_delay_never_exceeds_the_ceiling() -> None:
 def test_an_unrecognised_failure_is_retryable_with_a_cap_and_never_dropped() -> None:
     reason = classify(RuntimeError("something new from the provider"))
     assert (reason.code, reason.retryable, reason.max_attempts) == ("unknown", True, 3)
+
+
+def test_a_currency_mismatch_is_permanent_and_names_its_own_reason_code() -> None:
+    # CurrencyMismatch subclasses ValueError, which is what the ordering note on the classifier
+    # table is about: any entry broad enough to catch a plain ValueError has to sit below this
+    # one, or a mixed currency event reports as a parse failure and sends whoever reads the
+    # dead letter queue looking at the payload instead of at the aggregate.
+    reason = classify(CurrencyMismatch("cannot add USD to EUR"))
+    assert (reason.code, reason.retryable, reason.max_attempts) == (
+        "currency_mismatch",
+        False,
+        None,
+    )
+
+
+def test_an_event_in_the_wrong_currency_dead_letters_rather_than_folding(
+    conn: sqlite3.Connection,
+) -> None:
+    """The aggregate's own guard is the only production site that can raise CurrencyMismatch.
+
+    money.add and money.sub refuse to mix currencies and no module in the package calls either,
+    so without a delivery that actually mixes them the reason code above, and its place in the
+    ordering sensitive classifier table, are reached by nothing that runs.
+    """
+    clock = FakeClock()
+    for psp, code, currency in (("PSPEUR", "AUTHORISATION", "EUR"), ("PSPUSD", "CAPTURE", "USD")):
+        claim(
+            conn,
+            provider=Provider.ADYEN,
+            identity=f"{psp}:{code}",
+            raw=adyen_body(psp, code, minor=1000, currency=currency),
+            headers={},
+            clock=clock,
+        )
+        clock.advance(1.0)
+    report = drain(conn, clock=clock, policy=RetryPolicy())
+
+    state = load_payment(conn, "order-1")
+    dead = conn.execute(
+        "SELECT reason_code FROM deliveries WHERE state = ?", (DeliveryState.DEAD_LETTERED,)
+    ).fetchall()
+    assert state is not None
+    assert (state.currency, state.captured_minor) == ("EUR", 0)
+    assert (report.dead_lettered, [row[0] for row in dead]) == (1, ["currency_mismatch"])
 
 
 def test_a_body_that_is_not_utf_8_is_permanent_and_not_retried() -> None:

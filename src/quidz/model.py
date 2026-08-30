@@ -217,6 +217,19 @@ def apply_effect(state: PaymentState, event: CanonicalEvent) -> PaymentState:
             f"{kind} arrived before its prerequisite on payment {state.payment_id}"
         )
 
+    # Within a rank the newest event wins, and adjust_auth is the only fold that depends on the
+    # order it is processed in: authorize and capture are refused after the first, void and
+    # expire set a flag, and every remaining kind is additive. An adjustment carries the new
+    # TOTAL rather than a delta, so a stale one silently restores the hold that was correct
+    # before the newer one, and authorized_minor is the ceiling the over capture guard reads.
+    # Folded as a no op rather than refused: arriving late is not an error, IllegalTransition is
+    # non retryable, and the child effect row is still written by the caller either way.
+    # Strictly older rather than not newer, because Adyen's eventDate has one second resolution:
+    # two adjustments stamped in the same second have no newer one between them, and refusing
+    # them both would drop a legitimate change to the hold.
+    if kind is EffectKind.ADJUST_AUTH and event.sequence < state.last_sequence:
+        return state
+
     if kind is EffectKind.CAPTURE and state.captured_minor + minor > state.authorized_minor:
         raise AmountInvariantViolation(
             f"capture of {minor} would exceed the authorization of {state.authorized_minor} "

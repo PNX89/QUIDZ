@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import pathlib
 from typing import Any
 
 import pytest
@@ -20,6 +21,7 @@ PRIMARY = b"whsec_synthetic_primary"
 PREVIOUS = b"whsec_synthetic_previous"
 RAW = b'{"id":"evt_1","type":"charge.captured"}'
 NOW = 1_755_500_000
+README = pathlib.Path(__file__).resolve().parent.parent / "README.md"
 
 
 def sign(raw: bytes, timestamp: int, secret: bytes) -> str:
@@ -79,6 +81,27 @@ def test_tolerance_boundary_passes_and_one_second_past_it_is_stale() -> None:
     assert verify_stripe(RAW, headers, [PRIMARY], now=edge) == NOW
     with pytest.raises(StaleTimestamp):
         verify_stripe(RAW, headers, [PRIMARY], now=edge + 1)
+
+
+def test_the_default_window_is_the_five_minutes_stripe_documents() -> None:
+    """The boundary above pins the comparison, and this pins the number it compares against.
+
+    `edge` is computed from the constant, so both sides of that test slide together: set the
+    window to thirty seconds, or to a day, and it still passes. The width of a replay window is
+    a security property rather than a taste, and Stripe's own libraries default to 300 seconds,
+    so the literal belongs in a test where changing it has to be deliberate.
+    https://docs.stripe.com/webhooks/signature
+    """
+    assert STRIPE_DEFAULT_TOLERANCE_SECONDS == 300
+
+    # The row that carries the claim, never the whole README: a page this long contains the
+    # digits 300 somewhere whatever the constant says, so searching it would prove nothing.
+    row = next(
+        line
+        for line in README.read_text(encoding="utf-8").splitlines()
+        if "a tolerance window is possible" in line
+    )
+    assert f"{STRIPE_DEFAULT_TOLERANCE_SECONDS} seconds by default" in row
 
 
 def test_a_receiver_clock_behind_the_sender_does_not_read_live_traffic_as_a_replay() -> None:

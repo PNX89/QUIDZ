@@ -114,7 +114,7 @@ EXCEPTION REPORT
   outbound      BLOCKED
   ingest        open
   blocked_ids   order-CXSHRQTY, order:MB9WJKNY, pi_C29cZ86wXAsjLR2X, pi_W7bXVRVMG8MCWwSh
-  rationale     1 critical and 6 break findings, exposure 31022 minor units; outbound blocked for 4 id(s) under scope=payment
+  rationale     1 critical and 6 break findings, exposure 19600 GBP, 10422 JPY, 1000 USD; outbound blocked for 4 id(s) under scope=payment
 
   SEVERITY KIND                      PAYMENT                DELTA  DETAIL
   CRITICAL missing_locally           order-CXSHRQTY         12100  order-CXSHRQTY is at the provider and not in the ledger, 346806s old
@@ -425,6 +425,15 @@ PYG, RWF, UGX, VND, VUV, XAF, XOF and XPF; exponent 3 covers BHD, IQD, JOD, KWD,
 TND; everything else is 2. The JPY row in the demo output prints `5300 JPY` with no fractional
 part for exactly this reason.
 
+The gate reads its materiality threshold by value one currency at a time, for the same reason.
+A single total across currencies would be the addition `add` refuses, it would mean a different
+amount of real money in every currency it was compared against, and it would pool unrelated
+drift into a number that blocks payments none of which crossed the threshold alone. The
+rationale line in the output above therefore carries a figure per currency rather than one
+number. Converting to a reference currency would need rates, which Limitations lists as
+deliberately absent, so per-currency is the honest reading. The count threshold beside it is a
+count of findings rather than an amount, so that one is read across all of them.
+
 The scale is ISO 4217 and nothing else, which matters because the providers do not all agree
 with it. Adyen's own currency table differs on four codes and says so outright: "For CLP, CVE,
 IDR, and ISK the ISO 4217 standard has a different number of decimals than shown in our
@@ -590,7 +599,7 @@ uv run ruff format --check .
 uv run mypy
 ```
 
-150 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
+172 tests, deterministic, seeded, no network, no real sleep anywhere, the whole suite under a
 second on this machine. That count is asserted against a real collection run, because a number
 in a README is a number nobody updates. `mypy` runs `--strict` over both the package and the tests, because the
 wheel ships `py.typed` and that is a promise to whoever installs it.
